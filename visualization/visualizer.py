@@ -223,6 +223,129 @@ class GridVisualizer:
         hl_r = to_world(0.35, 0.16)
         ax.scatter([hl_l[0], hl_r[0]], [hl_l[1], hl_r[1]], color="#facc15", s=35, zorder=11, edgecolors="#ca8a04")
 
+    def draw_environment_legend_hud(self, ax_hud: plt.Axes):
+        """
+        Vẽ Bảng chú thích Môi trường mô phỏng (Environment Specification & Legend)
+        theo đúng yêu cầu của nhóm trưởng Hoa Đinh:
+        - Biểu đồ kích thước bao nhiêu (12x12)
+        - Ô đen là vật cản, ô trắng là đường đi
+        - Kho hàng cố định tọa độ nào (3,1)
+        - 3 điểm giao hàng cố định ở tọa độ nào
+        - Các thông số không gian MDP và hàm phần thưởng cố định
+        """
+        ax_hud.clear()
+        ax_hud.set_xlim(0, 10)
+        ax_hud.set_ylim(0, 10)
+        ax_hud.axis("off")
+
+        # Nền bảng chú thích màu trắng viền xám trang nhã
+        hud_bg = Rectangle((0.2, 0.2), 9.6, 9.6, facecolor="#f8fafc", edgecolor="#94a3b8", linewidth=1.5, zorder=0)
+        ax_hud.add_patch(hud_bg)
+
+        # Tiêu đề bảng chú thích
+        ax_hud.text(
+            5.0, 9.4, "CHÚ THÍCH MÔ HÌNH MÔI TRƯỜNG",
+            fontsize=11.5, fontweight="bold", color="#0f172a", ha="center"
+        )
+        ax_hud.text(
+            5.0, 9.05, "(Đề tài: Tối ưu hóa lộ trình giao hàng)",
+            fontsize=8.5, color="#64748b", ha="center", style="italic"
+        )
+        ax_hud.axhline(8.85, xmin=0.08, xmax=0.92, color="#cbd5e1", linestyle="-", linewidth=1.2)
+
+        # 1. Kích thước & Quy ước màu sắc ô
+        ax_hud.text(0.6, 8.45, "1. BẢN ĐỒ & QUY ƯỚC Ô LƯỚI:", fontsize=9.5, fontweight="bold", color="#1e3a8a")
+        ax_hud.text(0.9, 8.05, f"• Kích thước: Lưới {self.grid_size}x{self.grid_size} (Tổng 144 ô)", fontsize=9, color="#1e293b")
+        
+        # Icon ô đen
+        blk_box = Rectangle((0.9, 7.55), 0.35, 0.35, facecolor="#475569", edgecolor="#0f172a")
+        ax_hud.add_patch(blk_box)
+        ax_hud.text(1.4, 7.6, f"Ô Đen/Xám: Vật cản ({len(self.obstacles)} ô công trình)", fontsize=8.5, color="#334155")
+
+        # Icon ô trắng
+        wht_box = Rectangle((0.9, 7.10), 0.35, 0.35, facecolor="#ffffff", edgecolor="#94a3b8")
+        ax_hud.add_patch(wht_box)
+        ax_hud.text(1.4, 7.15, f"Ô Trắng: Đường đi hợp lệ ({self.grid_size*self.grid_size - len(self.obstacles)} ô)", fontsize=8.5, color="#334155")
+
+        ax_hud.axhline(6.85, xmin=0.08, xmax=0.92, color="#e2e8f0", linestyle="--", linewidth=0.8)
+
+        # 2. Tọa độ các điểm mốc cố định
+        ax_hud.text(0.6, 6.55, "2. CÁC TỌA ĐỘ CỐ ĐỊNH TRÊN LƯỚI:", fontsize=9.5, fontweight="bold", color="#1e3a8a")
+        
+        # Kho Depot
+        d_box = Rectangle((0.9, 6.10), 0.35, 0.35, facecolor="#dbeafe", edgecolor="#2563eb", linestyle="--")
+        ax_hud.add_patch(d_box)
+        ax_hud.text(1.4, 6.15, f"Kho hàng Depot (D): Tọa độ ({self.depot_pos[0]}, {self.depot_pos[1]})", fontsize=8.5, fontweight="bold", color="#1d4ed8")
+
+        # 3 Khách hàng
+        for k, cust in enumerate(self.customer_positions):
+            y_c = 5.65 - k * 0.42
+            star = ax_hud.scatter(1.08, y_c + 0.15, marker="*", color="#ea580c", s=80, edgecolors="#7c2d12")
+            ax_hud.text(1.4, y_c + 0.05, f"Điểm giao C{k+1}: Tọa độ ({cust[0]}, {cust[1]})", fontsize=8.5, color="#c2410c")
+
+        ax_hud.axhline(4.25, xmin=0.08, xmax=0.92, color="#e2e8f0", linestyle="--", linewidth=0.8)
+
+        # 3. Không gian MDP (Markov Decision Process)
+        ax_hud.text(0.6, 3.95, "3. MÔ HÌNH HÓA TOÁN HỌC (MDP):", fontsize=9.5, fontweight="bold", color="#1e3a8a")
+        ax_hud.text(0.9, 3.55, "• Trạng thái S = (x, y, visited_mask) | 872 states", fontsize=8.5, color="#334155")
+        ax_hud.text(0.9, 3.15, "• Hành động A = {0: Lên, 1: Xuống, 2: Trái, 3: Phải}", fontsize=8.5, color="#334155")
+
+        ax_hud.axhline(2.85, xmin=0.08, xmax=0.92, color="#e2e8f0", linestyle="--", linewidth=0.8)
+
+        # 4. Hàm phần thưởng cố định (Fixed Reward Shaping)
+        ax_hud.text(0.6, 2.55, "4. HÀM PHẦN THƯỞNG CỐ ĐỊNH (DOCS):", fontsize=9.5, fontweight="bold", color="#1e3a8a")
+        ax_hud.text(0.9, 2.15, "• Chi phí di chuyển mỗi bước: R = -1", fontsize=8.5, color="#475569")
+        ax_hud.text(0.9, 1.75, "• Phạt đâm vật cản / vượt biên: R = -10", fontsize=8.5, color="#dc2626")
+        ax_hud.text(0.9, 1.35, "• Thưởng giao hàng thành công: R = +50", fontsize=8.5, fontweight="bold", color="#16a34a")
+        ax_hud.text(0.9, 0.95, "• Thưởng hoàn thành về Kho: R = +100", fontsize=8.5, fontweight="bold", color="#2563eb")
+
+        # Chú thích cuối
+        ax_hud.text(5.0, 0.45, "(* Môi trường độc lập theo chuẩn Gymnasium *)", fontsize=8, color="#64748b", ha="center", style="italic")
+
+    def plot_environment_layout(
+        self,
+        save_path: Optional[str] = None,
+        show: bool = False
+    ):
+        """
+        Vẽ và lưu sơ đồ Môi trường mô phỏng ĐỘC LẬP
+        kèm Bảng chú thích môi trường (KHÔNG có thông tin thuật toán).
+        Dành riêng để nộp và trình bày phần Môi trường cho nhóm trưởng Hoa Đinh.
+        """
+        if save_path is None:
+            save_path = os.path.join(config.FIGURES_DIR, "environment_layout_12x12.png")
+
+        fig = plt.figure(figsize=(15, 8.5))
+        gs = gridspec.GridSpec(1, 2, width_ratios=[1.7, 1.0], wspace=0.15)
+        ax_map = fig.add_subplot(gs[0])
+        ax_hud = fig.add_subplot(gs[1])
+
+        # Vẽ bản đồ môi trường tĩnh (chưa có xe chạy, chưa có lộ trình)
+        self.draw_campus_map(ax_map, visited_cells=None, mask=0)
+
+        # Vẽ xe xuất phát tại Kho hàng
+        dr, dc = self.depot_pos
+        self.draw_vehicle(ax_map, float(dc), float(dr), 0.0, 1.0)
+
+        ax_map.set_title(
+            f"MÔ HÌNH MÔI TRƯỜNG GIAO HÀNG TRÊN LƯỚI 12x12 (CAMPUS GRIDWORLD)\n"
+            f"Khuôn viên Đại học Thủy Lợi | Kho: ({dr}, {dc}) | 3 Điểm giao cố định",
+            fontsize=11.5, fontweight="bold", pad=12, color="#0f172a"
+        )
+
+        # Vẽ Bảng chú thích môi trường bên phải
+        self.draw_environment_legend_hud(ax_hud)
+
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches="tight")
+            print(f"[ĐỒ HỌA MÔI TRƯỜNG] Đã lưu sơ đồ môi trường độc lập vào: {save_path}")
+
+        if show:
+            plt.show()
+        else:
+            plt.close(fig)
+
     def draw_telemetry_hud(
         self,
         ax_hud: plt.Axes,

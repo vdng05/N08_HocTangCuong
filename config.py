@@ -76,15 +76,16 @@ ACTION_SYMBOLS = {
     ACTION_RIGHT: "→"
 }
 
-# Cấu hình Phần thưởng (Reward Shaping theo Báo cáo Đề tài Mục 3.2.4)
+# Cấu hình Phần thưởng (Reward Shaping cố định theo Báo cáo Đề tài Mục 3.2.4)
+# TUÂN THỦ CHÍNH XÁC THEO TÀI LIỆU DOCS NHÓM TRƯỞNG HOA ĐINH YÊU CẦU:
 REWARD_STEP = -1.0           # Chi phí năng lượng / thời gian mỗi bước di chuyển
-REWARD_COLLISION = -10.0     # Phạt nặng khi va chạm vật cản hoặc vượt biên lưới
-REWARD_DELIVERY = 20.0       # Thưởng khi giao hàng thành công lần đầu tại mỗi điểm
-REWARD_TERMINAL = 100.0      # Thưởng lớn khi hoàn tất toàn bộ điểm và quay về kho an toàn
+REWARD_COLLISION = -10.0     # Phạt va chạm vật cản hoặc vượt biên lưới (xe giữ nguyên vị trí)
+REWARD_DELIVERY = 50.0       # Thưởng khi giao hàng thành công lần đầu tại mỗi điểm (R = +50)
+REWARD_TERMINAL = 100.0      # Thưởng lớn khi hoàn tất toàn bộ điểm và quay về kho an toàn (R = +100)
 
-# Siêu tham số cho Thuật toán Policy Iteration (Mục 5.1 Báo cáo)
-GAMMA = 0.99                 # Hệ số chiết khấu phần thưởng tương lai
-THETA = 1e-4                 # Ngưỡng hội tụ của giai đoạn Policy Evaluation
+# Siêu tham số cố định cho Thuật toán Policy Iteration (Mục 5.1 Báo cáo)
+GAMMA = 0.99                 # Hệ số chiết khấu phần thưởng tương lai (cố định)
+THETA = 1e-4                 # Ngưỡng hội tụ của giai đoạn Policy Evaluation (cố định)
 MAX_EVAL_ITERS = 1000        # Số vòng lặp tối đa cho mỗi lần Policy Evaluation
 MAX_PI_ITERS = 100           # Số lần cải thiện chính sách tối đa
 
