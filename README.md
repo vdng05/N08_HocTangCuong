@@ -63,28 +63,28 @@ pip install -r requirements.txt
 
 ### 2.2. Cách 1: Chạy chương trình chính (Xuất ảnh độ nét cao & Bảng dữ liệu)
 ```bash
-python delivery_grid_rl/main.py
+python main.py
 ```
 *Kết quả:* Huấn luyện Policy Iteration xong trong 2.5s, tự động xuất:
 - Ảnh lộ trình: `outputs/figures/optimal_route_12x12.png`
 - Bảng nhật ký: `outputs/data/route_steps_log.csv`
 - Bảng tóm tắt: `outputs/data/algorithm_benchmark_summary.csv`
 
-### 2.3. Cách 2: Chạy xem Hoạt ảnh xe chuyển động MƯỢT MÀ trên cửa sổ đồ họa
+### 2.3. Cách 2: Chạy xem Hoạt ảnh xe chuyển động trên cửa sổ đồ họa
 ```bash
-python delivery_grid_rl/main.py --animate
+python main.py --animate
 ```
 *Cửa sổ Matplotlib: Xe giao hàng ái qua từng ô, quay theo khúc cua, các ô đã đi đổi màu xanh, bảng Telemetry bên phải nhảy thông số thời gian thực.*
 
 ### 2.4. Cách 3: Xuất file GIF hoạt ảnh phục vụ Slide PowerPoint
 ```bash
-python delivery_grid_rl/main.py --save-gif
+python main.py --save-gif
 ```
 *Tạo file GIF tại `outputs/animations/delivery_animation.gif`.*
 
 ### 2.5. Cách 4: Chạy Phân tích Chuyên sâu (Heatmaps & Đồ thị hội tụ)
 ```bash
-python delivery_grid_rl/convergence_analysis.py
+python convergence_analysis.py
 ```
 *Tạo 2 file ảnh phân tích sâu*
 - `outputs/figures/value_function_heatmaps.png`
@@ -93,7 +93,7 @@ python delivery_grid_rl/convergence_analysis.py
 
 ### 2.6. Cách 5: Khởi chạy Ứng dụng Web Tương tác Streamlit
 ```bash
-streamlit run delivery_grid_rl/app_streamlit.py
+streamlit run app_streamlit.py
 ```
 *Mở giao diện web trên trình duyệt: Kéo slider để tua từng bước xe chạy, xem Heatmap, tra cứu dữ liệu và tải báo cáo CSV.*
 
