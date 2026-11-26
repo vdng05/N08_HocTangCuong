@@ -269,25 +269,38 @@ class GridVisualizer:
 
         ax_hud.axhline(6.85, xmin=0.08, xmax=0.92, color="#e2e8f0", linestyle="--", linewidth=0.8)
 
-        # 2. Tọa độ các điểm mốc cố định
-        ax_hud.text(0.6, 6.55, "2. CÁC TỌA ĐỘ CỐ ĐỊNH TRÊN LƯỚI:", fontsize=9.5, fontweight="bold", color="#1e3a8a")
+        # 2. Tọa độ các điểm mốc trên lưới
+        ax_hud.text(0.6, 6.55, f"2. TỌA ĐỘ KHO & {len(self.customer_positions)} ĐIỂM GIAO HÀNG:", fontsize=9.5, fontweight="bold", color="#1e3a8a")
         
         # Kho Depot
         d_box = Rectangle((0.9, 6.10), 0.35, 0.35, facecolor="#dbeafe", edgecolor="#2563eb", linestyle="--")
         ax_hud.add_patch(d_box)
         ax_hud.text(1.4, 6.15, f"Kho hàng Depot (D): Tọa độ ({self.depot_pos[0]}, {self.depot_pos[1]})", fontsize=8.5, fontweight="bold", color="#1d4ed8")
 
-        # 3 Khách hàng
-        for k, cust in enumerate(self.customer_positions):
-            y_c = 5.65 - k * 0.42
-            star = ax_hud.scatter(1.08, y_c + 0.15, marker="*", color="#ea580c", s=80, edgecolors="#7c2d12")
-            ax_hud.text(1.4, y_c + 0.05, f"Điểm giao C{k+1}: Tọa độ ({cust[0]}, {cust[1]})", fontsize=8.5, color="#c2410c")
+        # Các điểm khách hàng (Hỗ trợ hiển thị linh hoạt > 2 điểm, tự động chia 2 cột nếu > 3 điểm)
+        num_c = len(self.customer_positions)
+        if num_c <= 3:
+            for k, cust in enumerate(self.customer_positions):
+                y_c = 5.65 - k * 0.42
+                ax_hud.scatter(1.08, y_c + 0.15, marker="*", color="#ea580c", s=80, edgecolors="#7c2d12")
+                ax_hud.text(1.4, y_c + 0.05, f"Điểm giao C{k+1}: Tọa độ ({cust[0]}, {cust[1]})", fontsize=8.5, color="#c2410c")
+        else:
+            for k, cust in enumerate(self.customer_positions):
+                col_idx = k // 3
+                row_idx = k % 3
+                x_star = 1.08 + col_idx * 4.4
+                x_text = 1.40 + col_idx * 4.4
+                y_c = 5.65 - row_idx * 0.42
+                ax_hud.scatter(x_star, y_c + 0.15, marker="*", color="#ea580c", s=75, edgecolors="#7c2d12")
+                ax_hud.text(x_text, y_c + 0.05, f"C{k+1}: ({cust[0]}, {cust[1]})", fontsize=8.5, color="#c2410c")
 
         ax_hud.axhline(4.25, xmin=0.08, xmax=0.92, color="#e2e8f0", linestyle="--", linewidth=0.8)
 
         # 3. Không gian MDP (Markov Decision Process)
+        num_valid = self.grid_size * self.grid_size - len(self.obstacles)
+        num_states_dyn = num_valid * (1 << num_c)
         ax_hud.text(0.6, 3.95, "3. MÔ HÌNH HÓA TOÁN HỌC (MDP):", fontsize=9.5, fontweight="bold", color="#1e3a8a")
-        ax_hud.text(0.9, 3.55, "• Trạng thái S = (x, y, visited_mask) | 872 states", fontsize=8.5, color="#334155")
+        ax_hud.text(0.9, 3.55, f"• Trạng thái S = (x, y, mask) | {num_states_dyn} states", fontsize=8.5, color="#334155")
         ax_hud.text(0.9, 3.15, "• Hành động A = {0: Lên, 1: Xuống, 2: Trái, 3: Phải}", fontsize=8.5, color="#334155")
 
         ax_hud.axhline(2.85, xmin=0.08, xmax=0.92, color="#e2e8f0", linestyle="--", linewidth=0.8)

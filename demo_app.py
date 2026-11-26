@@ -1,0 +1,735 @@
+"""
+=============================================================================
+GIAO DIỆN MÔ PHỎNG VÀ TRỰC QUAN HÓA MÔI TRƯỜNG LƯỚI 12x12 (STREAMLIT)
+Đề tài: Ứng dụng Học tăng cường trong tối ưu hóa lộ trình giao hàng
+Thành viên: Vương Tiến Dũng (MSV: 2351170586) & Vũ Hải Đăng (MSV: 2351170580)
+Nhóm 8 - Khoa CNTT - Trường Đại học Thủy Lợi
+=============================================================================
+1. Môi trường độc lập hoàn toàn với thuật toán Policy Iteration.
+2. Các tham số mô hình và hàm phần thưởng là CỐ ĐỊNH.
+3. Khung bên phải mặc định hiển thị BẢNG CHÚ THÍCH MÔ HÌNH MÔI TRƯỜNG (Kích thước, ô đen vật cản, ô trắng đường đi, tọa độ kho và 3 điểm giao).
+4. Tách biệt phần Huấn luyện thuật toán sang chế độ riêng.
+=============================================================================
+"""
+
+import sys
+import os
+import json
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import seaborn as sns
+import streamlit as st
+import streamlit.components.v1 as components
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(BASE_DIR)
+
+import config
+from environment.delivery_env import DeliveryGridEnv
+from visualization.visualizer import GridVisualizer
+
+# Cấu hình giao diện Streamlit
+st.set_page_config(
+    page_title="Mô Phỏng Môi Trường Lưới 12x12 - Nhóm 8",
+    page_icon="🗺️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+st.title("🗺️ HỆ THỐNG MÔ PHỎNG MÔI TRƯỜNG GIAO HÀNG TRÊN LƯỚI 12x12")
+st.markdown("""
+**Học phần:** Học tăng cường và Ứng dụng | **Giảng viên hướng dẫn:** TS. Lê Nguyễn Tuấn Thành  
+**Nhóm thực hiện:** Nhóm 8 | **Phụ trách Môi trường:** Vương Tiến Dũng & Vũ Hải Đăng
+""")
+
+# =============================================================================
+# THANH BÊN (SIDEBAR): HIỂN THỊ CẤU HÌNH THÔNG SỐ CỐ ĐỊNH THEO TÀI LIỆU DOCS
+# (Đã bỏ thanh trượt chỉnh tham số theo đúng yêu cầu của Hoa Đinh)
+# =============================================================================
+st.sidebar.header("📋 THÔNG SỐ CỐ ĐỊNH")
+st.sidebar.info("""
+**Quy định bài toán:** Các thông số dưới đây được **cố định chuẩn xác** theo tài liệu Mô hình hóa MDP của nhóm, không cho phép tùy biến.
+""")
+
+st.sidebar.markdown(f"""
+* **Kích thước bản đồ:** `{config.GRID_SIZE} x {config.GRID_SIZE}` (144 ô)
+* **Kho hàng cố định (Depot):** `{config.DEPOT_POS}`
+* **Điểm giao cố định:**
+  - C1: `{config.CUSTOMER_POSITIONS[0]}`
+  - C2: `{config.CUSTOMER_POSITIONS[1]}`
+  - C3: `{config.CUSTOMER_POSITIONS[2]}`
+* **Số ô vật cản (ô đen):** `{len(config.OBSTACLES)} ô`
+* **Số ô đường đi (ô trắng):** `{config.GRID_SIZE*config.GRID_SIZE - len(config.OBSTACLES)} ô`
+""")
+
+st.sidebar.subheader("🎯 Hàm Phần Thưởng Cố Định")
+st.sidebar.markdown(f"""
+- Di chuyển mỗi bước: `R = {config.REWARD_STEP}`
+- Đâm vật cản / vượt biên: `R = {config.REWARD_COLLISION}`
+- Giao hàng thành công: `R = +{config.REWARD_DELIVERY}`
+- Hoàn thành về Kho Depot: `R = +{config.REWARD_TERMINAL}`
+""")
+
+st.sidebar.subheader("⚙️ Siêu Tham Số RL Cố Định")
+st.sidebar.markdown(f"""
+- Hệ số chiết khấu: `γ = {config.GAMMA}`
+- Ngưỡng hội tụ Bellman: `θ = {config.THETA}`
+""")
+
+# Lựa chọn Chế độ hiển thị
+st.sidebar.markdown("---")
+st.sidebar.subheader("🔘 CHẾ ĐỘ HIỂN THỊ")
+mode = st.sidebar.radio(
+    "Chọn nội dung hiển thị:",
+    ["1. Môi Trường Mô Phỏng Độc Lập (Báo Cáo Nhóm)", "2. Kiểm Thử Thuật Toán Policy Iteration"],
+    index=0
+)
+
+# Khởi tạo Visualizer
+visualizer = GridVisualizer(
+    grid_size=config.GRID_SIZE,
+    depot_pos=config.DEPOT_POS,
+    customer_positions=config.CUSTOMER_POSITIONS,
+    obstacles=config.OBSTACLES,
+    campus_buildings=config.CAMPUS_BUILDINGS
+)
+
+# =============================================================================
+# CHẾ ĐỘ 1: MÔI TRƯỜNG MÔ PHỎNG ĐỘC LẬP (NỘI DUNG CHÍNH ĐỂ TRÌNH BÀY)
+# =============================================================================
+if mode.startswith("1."):
+    st.header("1. KHẢO SÁT & TRỰC QUAN HÓA MÔ HÌNH MÔI TRƯỜNG ĐỘC LẬP")
+    st.caption("⌨️ **Click vào khung bản đồ bên dưới**, sau đó dùng phím mũi tên **`↑` `↓` `←` `→`** (hoặc **`W` `A` `S` `D`**) để lái xe mượt mà 60 FPS không độ trễ. Bấm **`R`** để Reset & Random điểm giao mới (> 2 điểm).")
+
+    # Chuẩn bị dữ liệu cấu hình từ Python sang JS
+    env_payload = {
+        "gridSize": config.GRID_SIZE,
+        "depot": list(config.DEPOT_POS),
+        "buildings": {name: [list(pt) for pt in pts] for name, pts in config.CAMPUS_BUILDINGS.items()},
+        "obstacles": [list(pt) for pt in config.OBSTACLES],
+        "rewards": {
+            "step": config.REWARD_STEP,
+            "collision": config.REWARD_COLLISION,
+            "delivery": config.REWARD_DELIVERY,
+            "terminal": config.REWARD_TERMINAL,
+        },
+        "minCustomers": 3,
+        "maxCustomers": 5,
+    }
+    env_json = json.dumps(env_payload, ensure_ascii=False)
+
+    html_code = f"""
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<style>
+  * {{ box-sizing: border-box; font-family: 'Segoe UI', Roboto, Arial, sans-serif; }}
+  body {{ margin: 0; padding: 0; background: transparent; color: #0f172a; }}
+  .wrapper {{
+    display: flex; gap: 16px; align-items: stretch;
+    background: #ffffff; border: 1px solid #cbd5e1; border-radius: 12px;
+    padding: 14px; outline: none;
+  }}
+  .wrapper:focus {{ border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.18); }}
+  .left-pane {{ flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; }}
+  canvas {{
+    border: 2px solid #94a3b8; border-radius: 8px; background: #f8fafc;
+    cursor: pointer; display: block;
+  }}
+  .kb-badge {{
+    margin-top: 8px; font-size: 12.5px; font-weight: 600;
+    padding: 4px 12px; border-radius: 999px;
+    background: #dbeafe; color: #1d4ed8;
+  }}
+  .kb-badge.unfocused {{ background: #fef3c7; color: #b45309; }}
+  .right-pane {{
+    flex: 1; min-width: 280px; display: flex; flex-direction: column; gap: 10px;
+  }}
+  .card {{
+    background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 10px; padding: 10px 12px;
+  }}
+  .card-title {{
+    font-size: 13px; font-weight: 700; color: #1e3a8a; margin-bottom: 6px;
+    border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;
+  }}
+  .metrics-grid {{
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  }}
+  .metric-box {{
+    background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px 8px;
+  }}
+  .metric-label {{ font-size: 11px; color: #64748b; font-weight: 600; }}
+  .metric-val {{ font-size: 15px; font-weight: 700; color: #0f172a; margin-top: 2px; }}
+  .toast {{
+    padding: 8px 10px; border-radius: 8px; font-size: 12.5px; font-weight: 600;
+    background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe;
+  }}
+  .toast.warn {{ background: #fef3c7; color: #b45309; border-color: #fde68a; }}
+  .toast.ok {{ background: #dcfce7; color: #15803d; border-color: #86efac; }}
+  .dpad {{
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; max-width: 240px; margin: 4px auto 0;
+  }}
+  .dpad button {{
+    padding: 8px 6px; border: 1px solid #cbd5e1; border-radius: 8px;
+    background: #ffffff; font-weight: 700; font-size: 13px; cursor: pointer;
+    transition: background 0.1s, transform 0.05s;
+  }}
+  .dpad button:hover {{ background: #eff6ff; border-color: #3b82f6; }}
+  .dpad button:active {{ transform: scale(0.96); background: #dbeafe; }}
+  .btn-reset {{
+    grid-column: span 3; background: #fee2e2 !important; color: #b91c1c; border-color: #fca5a5 !important;
+  }}
+  .btn-reset:hover {{ background: #fecaca !important; }}
+  .legend-list {{ font-size: 12px; line-height: 1.55; color: #334155; margin: 0; padding-left: 16px; }}
+  .cust-chips {{ display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }}
+  .chip {{
+    font-size: 11.5px; font-weight: 600; padding: 2px 7px; border-radius: 6px;
+    background: #ffedd5; color: #c2410c; border: 1px solid #fdba74;
+  }}
+  .chip.done {{ background: #dcfce7; color: #15803d; border-color: #86efac; text-decoration: line-through; }}
+  .log-section {{
+    margin-top: 14px; background: #ffffff; border: 1px solid #cbd5e1;
+    border-radius: 12px; padding: 12px 14px;
+  }}
+  .log-box {{
+    max-height: 200px; overflow-y: auto; font-size: 12.5px; line-height: 1.6;
+    background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 12px;
+    font-family: Consolas, monospace;
+  }}
+  .log-item {{ padding: 3px 6px; border-bottom: 1px dashed #e2e8f0; }}
+  .log-item.warn {{ color: #b45309; background: #fffbeb; }}
+  .log-item.ok {{ color: #15803d; background: #f0fdf4; font-weight: 600; }}
+  .log-item.done {{ color: #1d4ed8; background: #eff6ff; font-weight: 700; }}
+</style>
+</head>
+<body>
+<div class="wrapper" id="simWrapper" tabindex="0">
+  <div class="left-pane">
+    <canvas id="gridCanvas" width="552" height="552"></canvas>
+    <div class="kb-badge" id="kbStatus">⌨️ Bàn phím: Sẵn sàng (↑ ↓ ← → / WASD / R)</div>
+  </div>
+  <div class="right-pane">
+    <div class="toast" id="eventToast">Xe sẵn sàng tại Kho (3, 1). Hãy lái xe giao hết các điểm!</div>
+
+    <div class="card">
+      <div class="card-title">📊 TRẠNG THÁI MÔI TRƯỜNG (THỜI GIAN THỰC)</div>
+      <div class="metrics-grid">
+        <div class="metric-box"><div class="metric-label">Vị trí xe (r, c)</div><div class="metric-val" id="mPos">(3, 1)</div></div>
+        <div class="metric-box"><div class="metric-label">Tiến độ giao</div><div class="metric-val" id="mProg">0 / 3</div></div>
+        <div class="metric-box"><div class="metric-label">Tổng thưởng</div><div class="metric-val" id="mRew">0 đ</div></div>
+        <div class="metric-box"><div class="metric-label">Bước / Đã xong</div><div class="metric-val" id="mSteps">0 | 0 lượt</div></div>
+      </div>
+      <div style="margin-top:8px; font-size:12px; font-weight:600; color:#475569;">Các điểm giao hàng hiện tại:</div>
+      <div class="cust-chips" id="custChips"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🎮 ĐIỀU KHIỂN NHANH (PHÍM HOẶC CLICK)</div>
+      <div class="dpad">
+        <div></div>
+        <button onclick="moveAction(0)">⬆️ LÊN</button>
+        <div></div>
+        <button onclick="moveAction(2)">⬅️ TRÁI</button>
+        <button onclick="moveAction(1)">⬇️ XUỐNG</button>
+        <button onclick="moveAction(3)">➡️ PHẢI</button>
+        <button class="btn-reset" onclick="resetEnv(true)">🔄 Reset & Random điểm mới (R)</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📋 CHÚ THÍCH MÔ HÌNH MÔI TRƯỜNG</div>
+      <ul class="legend-list">
+        <li><b>Kích thước:</b> Lưới 12x12 (144 ô) | <b>Kho (D):</b> (3, 1)</li>
+        <li><b>Ô xám/đen:</b> Vật cản (35 ô tòa nhà) | <b>Ô trắng:</b> Đường đi (109 ô)</li>
+        <li><b>MDP:</b> S = (x, y, mask) | A = {{Lên, Xuống, Trái, Phải}}</li>
+        <li><b>Thưởng cố định:</b> Bước <code>-1</code> | Va chạm <code>-10</code> | Giao <code>+50</code> | Về kho <code>+100</code></li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="log-section">
+  <div class="card-title">📜 NHẬT KÝ DI CHUYỂN CỦA XE (TỪNG BƯỚC)</div>
+  <div class="log-box" id="moveLog"><div class="log-item">Chưa có bước di chuyển nào.</div></div>
+</div>
+
+<script>
+const CFG = {env_json};
+const N = CFG.gridSize;
+const canvas = document.getElementById('gridCanvas');
+const ctx = canvas.getContext('2d');
+const CELL = canvas.width / N;
+
+const obstacleSet = new Set(CFG.obstacles.map(p => p[0] + ',' + p[1]));
+const validCells = [];
+for (let r = 0; r < N; r++) {{
+  for (let c = 0; c < N; c++) {{
+    const key = r + ',' + c;
+    if (!obstacleSet.has(key) && !(r === CFG.depot[0] && c === CFG.depot[1])) {{
+      validCells.push([r, c]);
+    }}
+  }}
+}}
+
+let customers = [];
+let agentR = CFG.depot[0], agentC = CFG.depot[1];
+let renderR = agentR, renderC = agentC;
+let targetDir = [1, 0]; // [dr, dc]
+let mask = 0;
+let stepCount = 0;
+let totalReward = 0;
+let completedRounds = 0;
+let visitedSet = new Set([agentR + ',' + agentC]);
+let floatingTexts = [];
+let collisionFlash = 0;
+let moveLogs = [];
+
+function renderLogs() {{
+  const logBox = document.getElementById('moveLog');
+  if (moveLogs.length === 0) {{
+    logBox.innerHTML = '<div class="log-item">Chưa có bước di chuyển nào.</div>';
+    return;
+  }}
+  logBox.innerHTML = moveLogs.slice().reverse().map(item =>
+    `<div class="log-item ${{item.cls}}">${{item.text}}</div>`
+  ).join('');
+}}
+
+function addLog(text, cls = '') {{
+  moveLogs.push({{ text, cls }});
+  if (moveLogs.length > 100) moveLogs.shift();
+  renderLogs();
+}}
+
+function randomizeCustomers() {{
+  const count = Math.floor(Math.random() * (CFG.maxCustomers - CFG.minCustomers + 1)) + CFG.minCustomers;
+  const pool = [...validCells];
+  for (let i = pool.length - 1; i > 0; i--) {{
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }}
+  customers = pool.slice(0, count);
+}}
+
+function setToast(msg, type = 'info') {{
+  const el = document.getElementById('eventToast');
+  el.textContent = msg;
+  el.className = 'toast' + (type === 'warn' ? ' warn' : type === 'ok' ? ' ok' : '');
+}}
+
+function updateHUD() {{
+  let delivered = 0;
+  for (let k = 0; k < customers.length; k++) {{
+    if (mask & (1 << k)) delivered++;
+  }}
+  document.getElementById('mPos').textContent = `(${{agentR}}, ${{agentC}})`;
+  document.getElementById('mProg').textContent = `${{delivered}} / ${{customers.length}}`;
+  document.getElementById('mRew').textContent = `${{totalReward >= 0 ? '+' : ''}}${{totalReward}} đ`;
+  document.getElementById('mSteps').textContent = `${{stepCount}} | ${{completedRounds}} lượt`;
+
+  const chips = document.getElementById('custChips');
+  chips.innerHTML = customers.map((pt, k) => {{
+    const done = (mask & (1 << k)) !== 0;
+    return `<span class="chip ${{done ? 'done' : ''}}">C${{k+1}} (${{pt[0]}},${{pt[1]}}) ${{done ? '✓' : ''}}</span>`;
+  }}).join('');
+}}
+
+function resetEnv(manual = false) {{
+  randomizeCustomers();
+  agentR = CFG.depot[0];
+  agentC = CFG.depot[1];
+  renderR = agentR;
+  renderC = agentC;
+  targetDir = [1, 0];
+  mask = 0;
+  stepCount = 0;
+  if (manual) totalReward = 0;
+  visitedSet = new Set([agentR + ',' + agentC]);
+  if (manual) {{
+    moveLogs = [];
+    renderLogs();
+    setToast(`🔄 Đã Reset & Random ${{customers.length}} điểm giao mới!`, 'info');
+  }}
+  updateHUD();
+}}
+
+function addFloat(r, c, text, color) {{
+  floatingTexts.push({{ x: (c + 0.5) * CELL, y: (r + 0.3) * CELL, text, color, alpha: 1.0 }});
+}}
+
+const DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]]; // UP, DOWN, LEFT, RIGHT
+const DIR_NAMES = ['LÊN', 'XUỐNG', 'TRÁI', 'PHẢI'];
+
+function moveAction(act) {{
+  const prevR = agentR, prevC = agentC;
+  const [dr, dc] = DIRS[act];
+  targetDir = [dr, dc];
+  stepCount++;
+  const nr = agentR + dr;
+  const nc = agentC + dc;
+
+  // Kiểm tra biên hoặc vật cản
+  if (nr < 0 || nr >= N || nc < 0 || nc >= N || obstacleSet.has(nr + ',' + nc)) {{
+    totalReward += CFG.rewards.collision;
+    collisionFlash = 1.0;
+    addFloat(agentR, agentC, `${{CFG.rewards.collision}}đ`, '#dc2626');
+    setToast(`⚠️ Va chạm vật cản / biên! Xe giữ nguyên tại (${{agentR}}, ${{agentC}}), phạt ${{CFG.rewards.collision}}đ`, 'warn');
+    addLog(`#${{stepCount}} | ${{DIR_NAMES[act]}} | (${{prevR}},${{prevC}}) ✖ (${{nr}},${{nc}}) | R=${{CFG.rewards.collision}} (Va chạm)`, 'warn');
+    updateHUD();
+    return;
+  }}
+
+  agentR = nr;
+  agentC = nc;
+  visitedSet.add(agentR + ',' + agentC);
+  let stepRew = CFG.rewards.step;
+  let eventMsg = `Di chuyển ${{DIR_NAMES[act]}} tới (${{agentR}}, ${{agentC}}) (${{CFG.rewards.step}}đ)`;
+  let eventType = 'info';
+  let logCls = '';
+  let logNote = '';
+
+  // Kiểm tra giao hàng
+  for (let k = 0; k < customers.length; k++) {{
+    if (customers[k][0] === agentR && customers[k][1] === agentC && !(mask & (1 << k))) {{
+      mask |= (1 << k);
+      stepRew += CFG.rewards.delivery;
+      addFloat(agentR, agentC, `+${{CFG.rewards.delivery}}đ`, '#16a34a');
+      eventMsg = `★ GIAO THÀNH CÔNG C${{k+1}} tại (${{agentR}}, ${{agentC}})! (+${{CFG.rewards.delivery}}đ)`;
+      eventType = 'ok';
+      logCls = 'ok';
+      logNote = ` ★ Giao C${{k+1}}`;
+      break;
+    }}
+  }}
+
+  totalReward += stepRew;
+
+  // Kiểm tra hoàn thành về Kho
+  const targetMask = (1 << customers.length) - 1;
+  if (mask === targetMask && agentR === CFG.depot[0] && agentC === CFG.depot[1]) {{
+    totalReward += CFG.rewards.terminal;
+    stepRew += CFG.rewards.terminal;
+    completedRounds++;
+    addFloat(agentR, agentC, `+${{CFG.rewards.terminal}}đ HOÀN THÀNH!`, '#2563eb');
+    addLog(`#${{stepCount}} | ${{DIR_NAMES[act]}} | (${{prevR}},${{prevC}}) → (${{agentR}},${{agentC}}) | R=+${{stepRew}} 🎉 XONG LƯỢT #${{completedRounds}}!`, 'done');
+    const roundTotal = totalReward;
+    totalReward = 0;
+    resetEnv(false);
+    setToast(`🎉 HOÀN THÀNH LƯỢT #${{completedRounds}} (+${{roundTotal}}đ)! Đã tự động Reset & Random ${{customers.length}} điểm mới!`, 'ok');
+    return;
+  }}
+
+  const maskBin = mask.toString(2).padStart(customers.length, '0');
+  addLog(`#${{stepCount}} | ${{DIR_NAMES[act]}} | (${{prevR}},${{prevC}}) → (${{agentR}},${{agentC}}) | R=${{stepRew >= 0 ? '+' : ''}}${{stepRew}} | Mask:${{maskBin}}${{logNote}}`, logCls);
+  setToast(eventMsg, eventType);
+  updateHUD();
+}}
+
+function drawScene() {{
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Smooth interpolation
+  renderR += (agentR - renderR) * 0.35;
+  renderC += (agentC - renderC) * 0.35;
+
+  // 1. Nền & ô đã đi qua
+  for (let r = 0; r < N; r++) {{
+    for (let c = 0; c < N; c++) {{
+      const x = c * CELL, y = r * CELL;
+      if (visitedSet.has(r + ',' + c)) {{
+        ctx.fillStyle = '#dcfce7';
+        ctx.fillRect(x, y, CELL, CELL);
+      }} else {{
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(x, y, CELL, CELL);
+      }}
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x, y, CELL, CELL);
+    }}
+  }}
+
+  // 2. Tòa nhà vật cản
+  for (const [bName, pts] of Object.entries(CFG.buildings)) {{
+    const isField = bName.includes('Sân');
+    ctx.fillStyle = isField ? '#065f46' : '#334155';
+    let sumR = 0, sumC = 0;
+    for (const [r, c] of pts) {{
+      ctx.fillRect(c * CELL + 1, r * CELL + 1, CELL - 2, CELL - 2);
+      sumR += r; sumC += c;
+    }}
+    const cx = (sumC / pts.length + 0.5) * CELL;
+    const cy = (sumR / pts.length + 0.5) * CELL;
+    ctx.fillStyle = 'rgba(15,23,42,0.75)';
+    const shortName = bName.replace('Trung Tâm', '').replace('Khu', '').trim();
+    ctx.font = 'bold 9px Segoe UI';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(shortName, cx, cy);
+  }}
+
+  // 3. Kho Depot
+  const dx = CFG.depot[1] * CELL, dy = CFG.depot[0] * CELL;
+  ctx.fillStyle = '#dbeafe';
+  ctx.fillRect(dx + 2, dy + 2, CELL - 4, CELL - 4);
+  ctx.strokeStyle = '#2563eb';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([4, 3]);
+  ctx.strokeRect(dx + 2, dy + 2, CELL - 4, CELL - 4);
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#1d4ed8';
+  ctx.font = 'bold 11px Segoe UI';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('DEPOT', dx + CELL / 2, dy + CELL / 2);
+
+  // 4. Các điểm khách hàng
+  customers.forEach((pt, k) => {{
+    const cx = (pt[1] + 0.5) * CELL, cy = (pt[0] + 0.5) * CELL;
+    const done = (mask & (1 << k)) !== 0;
+    if (done) {{
+      ctx.fillStyle = '#bbf7d0';
+      ctx.fillRect(pt[1] * CELL + 3, pt[0] * CELL + 3, CELL - 6, CELL - 6);
+      ctx.strokeStyle = '#16a34a';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(pt[1] * CELL + 3, pt[0] * CELL + 3, CELL - 6, CELL - 6);
+      ctx.fillStyle = '#15803d';
+      ctx.font = 'bold 12px Segoe UI';
+      ctx.fillText(`C${{k+1}}✓`, cx, cy);
+    }} else {{
+      ctx.fillStyle = '#ea580c';
+      ctx.beginPath();
+      ctx.arc(cx, cy, CELL * 0.32, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#7c2d12';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 11px Segoe UI';
+      ctx.fillText(`C${{k+1}}`, cx, cy);
+    }}
+  }});
+
+  // 5. Vẽ xe giao hàng mượt mà
+  const vx = (renderC + 0.5) * CELL;
+  const vy = (renderR + 0.5) * CELL;
+  const angle = Math.atan2(targetDir[0], targetDir[1]); // dr, dc
+
+  ctx.save();
+  ctx.translate(vx, vy);
+  ctx.rotate(angle);
+
+  // Chùm đèn pha
+  ctx.fillStyle = 'rgba(254, 240, 138, 0.45)';
+  ctx.beginPath();
+  ctx.moveTo(CELL * 0.3, -CELL * 0.16);
+  ctx.lineTo(CELL * 0.85, -CELL * 0.34);
+  ctx.lineTo(CELL * 0.85, CELL * 0.34);
+  ctx.lineTo(CELL * 0.3, CELL * 0.16);
+  ctx.closePath();
+  ctx.fill();
+
+  // Bánh xe
+  ctx.fillStyle = '#111827';
+  [[-0.22, -0.26], [0.16, -0.26], [-0.22, 0.20], [0.16, 0.20]].forEach(([wx, wy]) => {{
+    ctx.fillRect(wx * CELL, wy * CELL, CELL * 0.14, CELL * 0.08);
+  }});
+
+  // Thân xe
+  ctx.fillStyle = collisionFlash > 0.1 ? '#dc2626' : '#2563eb';
+  ctx.strokeStyle = '#1e3a8a';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(-CELL * 0.32, -CELL * 0.21, CELL * 0.64, CELL * 0.42, 5);
+  ctx.fill();
+  ctx.stroke();
+
+  // Kính chắn gió
+  ctx.fillStyle = '#93c5fd';
+  ctx.fillRect(CELL * 0.12, -CELL * 0.15, CELL * 0.13, CELL * 0.30);
+
+  // Đèn pha
+  ctx.fillStyle = '#facc15';
+  ctx.fillRect(CELL * 0.29, -CELL * 0.16, 4, 5);
+  ctx.fillRect(CELL * 0.29, CELL * 0.11, 4, 5);
+  ctx.restore();
+
+  if (collisionFlash > 0) collisionFlash *= 0.85;
+
+  // 6. Chữ nổi phần thưởng
+  for (let i = floatingTexts.length - 1; i >= 0; i--) {{
+    const ft = floatingTexts[i];
+    ctx.save();
+    ctx.globalAlpha = ft.alpha;
+    ctx.fillStyle = ft.color;
+    ctx.font = 'bold 13px Segoe UI';
+    ctx.textAlign = 'center';
+    ctx.fillText(ft.text, ft.x, ft.y);
+    ctx.restore();
+    ft.y -= 0.8;
+    ft.alpha -= 0.025;
+    if (ft.alpha <= 0) floatingTexts.splice(i, 1);
+  }}
+
+  requestAnimationFrame(drawScene);
+}}
+
+// Bắt phím chắc chắn trên wrapper & window
+const wrapper = document.getElementById('simWrapper');
+const kbStatus = document.getElementById('kbStatus');
+
+function handleKey(e) {{
+  if (e.repeat) return;
+  if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {{ e.preventDefault(); moveAction(0); }}
+  else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') {{ e.preventDefault(); moveAction(1); }}
+  else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {{ e.preventDefault(); moveAction(2); }}
+  else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {{ e.preventDefault(); moveAction(3); }}
+  else if (e.key === 'r' || e.key === 'R') {{ e.preventDefault(); resetEnv(true); }}
+}}
+
+// Chỉ gắn 1 listener duy nhất trên window để tránh event bubbling làm xe đi 2 bước!
+window.addEventListener('keydown', handleKey);
+wrapper.addEventListener('focus', () => {{
+  kbStatus.textContent = '⌨️ Bàn phím: ĐÃ KẾT NỐI (↑ ↓ ← → / WASD / R)';
+  kbStatus.classList.remove('unfocused');
+}});
+wrapper.addEventListener('blur', () => {{
+  kbStatus.textContent = '⚠️ Click vào bản đồ để bật điều khiển bàn phím';
+  kbStatus.classList.add('unfocused');
+}});
+canvas.addEventListener('click', () => wrapper.focus());
+
+// Khởi chạy
+resetEnv(false);
+wrapper.focus();
+requestAnimationFrame(drawScene);
+</script>
+</body>
+</html>
+"""
+
+    components.html(html_code, height=880)
+
+# =============================================================================
+# CHẾ ĐỘ 2: KIỂM THỬ THUẬT TOÁN POLICY ITERATION (ĐƯỢC TÁCH RIÊNG)
+# =============================================================================
+else:
+    st.header("2. KẾT QUẢ THỰC NGHIỆM THUẬT TOÁN POLICY ITERATION")
+    st.info("Phần này được tách độc lập: Chỉ khi nào chủ động gọi chạy thuật toán thì mới tính toán chính sách tối ưu, hiển thị Telemetry và biểu đồ hội tụ.")
+
+    from algorithms.policy_iteration import PolicyIteration
+
+    @st.cache_resource
+    def run_pi():
+        env_instance = DeliveryGridEnv()
+        solver_instance = PolicyIteration(env_instance, gamma=config.GAMMA, theta=config.THETA)
+        hist = solver_instance.train(verbose=False)
+        route = solver_instance.extract_optimal_route(max_steps=100)
+        return env_instance, solver_instance, hist, route
+
+    env_pi, solver_pi, hist_pi, route_pi = run_pi()
+
+    # Metric kết quả
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Tổng Quãng Đường Tối Ưu", f"{route_pi['total_steps']} bước", "Tối ưu tuyệt đối")
+    m2.metric("Tổng Phần Thưởng", f"{route_pi['total_reward']:.1f} điểm", "Đúng hàm thưởng mới")
+    m3.metric("Số Vòng Lặp Hội Tụ", f"{hist_pi['pi_iterations']} vòng", "Ổn định chính sách")
+    m4.metric("Thời Gian Huấn Luyện", f"{hist_pi['training_time_seconds']:.3f} s", "Tức thì trên CPU")
+
+    st.markdown("---")
+
+    tab_pi1, tab_pi2, tab_pi3 = st.tabs([
+        "🎬 Hoạt Ảnh Mô Phỏng Lộ Trình",
+        "📈 Phân Tích Độ Hội Tụ & Bản Đồ Nhiệt V(s)",
+        "📋 Nhật Ký Chi Tiết Từng Bước Đi"
+    ])
+
+    with tab_pi1:
+        st.subheader("Lộ Trình Tối Ưu và Bảng Telemetry Thời Gian Thực")
+        step_val = st.slider("Kéo xem vị trí xe:", 0, route_pi["total_steps"], route_pi["total_steps"], 1)
+
+        fig_pi = plt.figure(figsize=(15, 8.5))
+        gs_pi = gridspec.GridSpec(1, 2, width_ratios=[1.7, 1.0], wspace=0.15)
+        ax_m = fig_pi.add_subplot(gs_pi[0])
+        ax_t = fig_pi.add_subplot(gs_pi[1])
+
+        # Vẽ bản đồ có lộ trình
+        coords = route_pi["route_coords"]
+        states_s = route_pi["states_sequence"]
+        visited = set(coords[:step_val + 1])
+        c_pos = coords[step_val]
+        c_mask = states_s[step_val][2]
+
+        visualizer.draw_campus_map(ax_m, visited_cells=visited, mask=c_mask)
+
+        # Hướng xe
+        if step_val < len(coords) - 1:
+            dr = coords[step_val + 1][0] - c_pos[0]
+            dc = coords[step_val + 1][1] - c_pos[1]
+        elif step_val > 0:
+            dr = c_pos[0] - coords[step_val - 1][0]
+            dc = c_pos[1] - coords[step_val - 1][1]
+        else:
+            dr, dc = 1, 0
+
+        visualizer.draw_vehicle(ax_m, float(c_pos[1]), float(c_pos[0]), float(dc), float(dr))
+
+        act_text = route_pi["action_names"][step_val - 1] if step_val > 0 else "XUẤT PHÁT"
+        cum_rew = sum(route_pi["rewards"][:step_val])
+        evt_txt = "Xe đang di chuyển theo lộ trình tối ưu..."
+        if c_mask == 7 and c_pos == config.DEPOT_POS:
+            evt_txt = "★ HOÀN TẤT VÀ VỀ KHO THÀNH CÔNG (+100đ)!"
+        elif step_val > 0:
+            for k, cp in enumerate(config.CUSTOMER_POSITIONS):
+                if c_pos == cp and (c_mask & (1 << k)):
+                    evt_txt = f"★ GIAO THÀNH CÔNG C{k+1} (+50đ)!"
+
+        visualizer.draw_telemetry_hud(
+            ax_t, step_val, route_pi["total_steps"], c_pos, act_text, c_mask, cum_rew, evt_txt
+        )
+
+        st.pyplot(fig_pi)
+        plt.close(fig_pi)
+
+    with tab_pi2:
+        st.subheader("Bản Đồ Nhiệt Hàm Giá Trị Trạng Thái V(s) Qua 4 Giai Đoạn")
+        h1, h2 = st.columns(2)
+        stage_masks = [
+            (0, "Giai Đoạn 1: Chưa giao khách nào -> Hướng tới C2 (7, 4)"),
+            (2, "Giai Đoạn 2: Đã giao C2 -> Hướng tới C3 (7, 9)"),
+            (6, "Giai Đoạn 3: Đã giao C2 & C3 -> Hướng tới C1 (2, 9)"),
+            (7, "Giai Đoạn 4: Đã giao đủ 3 điểm -> Quay về Kho (3, 1)")
+        ]
+        for idx, (m, stitle) in enumerate(stage_masks):
+            grid_v = np.full((config.GRID_SIZE, config.GRID_SIZE), np.nan)
+            for r in range(config.GRID_SIZE):
+                for c in range(config.GRID_SIZE):
+                    s = (r, c, m)
+                    if s in env_pi.state_to_idx:
+                        grid_v[r, c] = solver_pi.V[env_pi.state_to_idx[s]]
+
+            fig_h, ax_h = plt.subplots(figsize=(6, 5))
+            sns.heatmap(grid_v, ax=ax_h, cmap="viridis" if m != 7 else "plasma", cbar=True)
+            ax_h.set_title(stitle, fontsize=9.5, fontweight="bold")
+            
+            target_col = h1 if idx % 2 == 0 else h2
+            target_col.pyplot(fig_h)
+            plt.close(fig_h)
+
+    with tab_pi3:
+        st.subheader("Bảng Nhật Ký 26 Bước Di Chuyển")
+        steps_d = []
+        for step_i in range(len(route_pi["actions_taken"])):
+            steps_d.append({
+                "Bước": step_i + 1,
+                "Tọa độ hiện tại": f"({route_pi['route_coords'][step_i][0]}, {route_pi['route_coords'][step_i][1]})",
+                "Hành động": route_pi["action_names"][step_i],
+                "Tọa độ kế tiếp": f"({route_pi['route_coords'][step_i+1][0]}, {route_pi['route_coords'][step_i+1][1]})",
+                "Phần thưởng": route_pi["rewards"][step_i],
+                "Đã giao (Bitmask)": bin(route_pi["states_sequence"][step_i][2])
+            })
+        st.dataframe(pd.DataFrame(steps_d), use_container_width=True)

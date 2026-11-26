@@ -10,7 +10,7 @@ Nhóm 8 - Trường Đại học Thủy Lợi
 # Kích thước lưới
 GRID_SIZE = 12  # Lưới 12 x 12 (hàng 0..11, cột 0..11)
 
-# Tọa độ Kho hàng cố định (Depot) theo yêu cầu của nhóm
+# Tọa độ Kho hàng cố định (Depot) 
 DEPOT_POS = (3, 1)
 
 # Tọa độ các điểm giao hàng cố định (Customer Delivery Points)
@@ -19,13 +19,12 @@ CUSTOMER_POSITIONS = [
     (2, 9),  # C1
     (7, 4),  # C2
     (7, 9)   # C3
-]
+] 
 
 NUM_CUSTOMERS = len(CUSTOMER_POSITIONS)
 TARGET_MASK = (1 << NUM_CUSTOMERS) - 1  # 0b111 = 7 (khi cả 3 điểm đều đã được phục vụ)
 
 # Danh sách tọa độ các ô vật cản (Obstacles - Các tòa nhà / KTX / Sân bóng)
-# Dựa trên layout mặt bằng khuôn viên và ảnh chụp phác họa trong nhóm:
 CAMPUS_BUILDINGS = {
     "KTX Khu Tây": [(0, 0), (0, 1), (1, 0), (1, 1)],
     "Nhà A1 (Hiệu Bộ)": [(0, 3), (0, 4), (2, 3), (2, 4)],
@@ -76,8 +75,7 @@ ACTION_SYMBOLS = {
     ACTION_RIGHT: "→"
 }
 
-# Cấu hình Phần thưởng (Reward Shaping cố định theo Báo cáo Đề tài Mục 3.2.4)
-# TUÂN THỦ CHÍNH XÁC THEO TÀI LIỆU DOCS NHÓM TRƯỞNG HOA ĐINH YÊU CẦU:
+# Cấu hình Phần thưởng (Reward Shaping cố định)
 REWARD_STEP = -1.0           # Chi phí năng lượng / thời gian mỗi bước di chuyển
 REWARD_COLLISION = -10.0     # Phạt va chạm vật cản hoặc vượt biên lưới (xe giữ nguyên vị trí)
 REWARD_DELIVERY = 50.0       # Thưởng khi giao hàng thành công lần đầu tại mỗi điểm (R = +50)

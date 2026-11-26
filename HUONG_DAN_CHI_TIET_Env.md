@@ -93,7 +93,7 @@ python run_env.py
 
 ### 3.2. Mở Web Streamlit để demo trực tiếp:
 ```bash
-streamlit run app_streamlit.py
+streamlit run demo_app.py
 ```
 * **Hiện tượng:**
   * Thanh bên (Sidebar) hiển thị toàn bộ thông số cố định theo Docs.

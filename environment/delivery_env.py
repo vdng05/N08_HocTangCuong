@@ -48,14 +48,24 @@ class DeliveryGridEnv(gym.Env):
 
     metadata = {"render_modes": ["human", "ansi"], "render_fps": 4}
 
-    def __init__(self, render_mode: Optional[str] = None):
+    def __init__(
+        self,
+        render_mode: Optional[str] = None,
+        random_customers: bool = False,
+        min_customers: int = 3,
+        max_customers: int = 5
+    ):
         super().__init__()
 
         self.grid_size = config.GRID_SIZE
         self.depot_pos = config.DEPOT_POS
-        self.customer_positions = config.CUSTOMER_POSITIONS
-        self.num_customers = config.NUM_CUSTOMERS
-        self.target_mask = config.TARGET_MASK
+        self.random_customers = random_customers
+        self.min_customers = max(3, min_customers)  # Đảm bảo số lượng điểm giao luôn > 2
+        self.max_customers = max(self.min_customers, max_customers)
+
+        self.customer_positions = list(config.CUSTOMER_POSITIONS)
+        self.num_customers = len(self.customer_positions)
+        self.target_mask = (1 << self.num_customers) - 1
         self.obstacles = set(config.OBSTACLES)
         self.render_mode = render_mode
 
@@ -63,17 +73,17 @@ class DeliveryGridEnv(gym.Env):
         self.action_space = spaces.Discrete(4)
 
         # Không gian quan sát theo chuẩn Gym:
-        # Gồm vị trí xe [row, col] và bitmask [0..7]
+        # Gồm vị trí xe [row, col] và bitmask
         self.observation_space = spaces.Dict({
             "agent_pos": spaces.Box(
                 low=np.array([0, 0], dtype=np.int32),
                 high=np.array([self.grid_size - 1, self.grid_size - 1], dtype=np.int32),
                 dtype=np.int32
             ),
-            "visited_mask": spaces.Discrete(1 << self.num_customers)
+            "visited_mask": spaces.Discrete(1 << self.max_customers if self.random_customers else (1 << self.num_customers))
         })
 
-        # Xây dựng danh sách toàn bộ các trạng thái hợp lệ trong MDP (chỉ trên ô không có vật cản)
+        # Xây dựng danh sách toàn bộ các ô hợp lệ (chỉ trên ô không có vật cản)
         self.valid_cells = [
             (r, c)
             for r in range(self.grid_size)
@@ -81,19 +91,24 @@ class DeliveryGridEnv(gym.Env):
             if (r, c) not in self.obstacles
         ]
 
-        self.all_states = [
-            (r, c, mask)
-            for (r, c) in self.valid_cells
-            for mask in range(1 << self.num_customers)
-        ]
-
-        self.state_to_idx = {s: idx for idx, s in enumerate(self.all_states)}
-        self.idx_to_state = {idx: s for idx, s in enumerate(self.all_states)}
-        self.num_states = len(self.all_states)
-
-        # Trạng thái kết thúc: Tại Kho hàng và mask đã phục vụ đủ cả 3 điểm
-        self.terminal_state = (self.depot_pos[0], self.depot_pos[1], self.target_mask)
-        self.terminal_idx = self.state_to_idx[self.terminal_state]
+        if not self.random_customers:
+            self.all_states = [
+                (r, c, mask)
+                for (r, c) in self.valid_cells
+                for mask in range(1 << self.num_customers)
+            ]
+            self.state_to_idx = {s: idx for idx, s in enumerate(self.all_states)}
+            self.idx_to_state = {idx: s for idx, s in enumerate(self.all_states)}
+            self.num_states = len(self.all_states)
+            self.terminal_state = (self.depot_pos[0], self.depot_pos[1], self.target_mask)
+            self.terminal_idx = self.state_to_idx[self.terminal_state]
+        else:
+            self.all_states = []
+            self.state_to_idx = {}
+            self.idx_to_state = {}
+            self.num_states = len(self.valid_cells) * (1 << self.num_customers)
+            self.terminal_state = (self.depot_pos[0], self.depot_pos[1], self.target_mask)
+            self.terminal_idx = None
 
         # Biến theo dõi trạng thái hiện tại của phiên chạy
         self.current_state: Tuple[int, int, int] = (self.depot_pos[0], self.depot_pos[1], 0)
@@ -147,6 +162,17 @@ class DeliveryGridEnv(gym.Env):
 
         return (nr, nc, nmask), reward, False
 
+    def _randomize_customers(self):
+        """Sinh ngẫu nhiên số lượng (> 2) và vị trí các điểm giao hàng trên ô hợp lệ."""
+        num_c = int(self.np_random.integers(self.min_customers, self.max_customers + 1))
+        candidates = [cell for cell in self.valid_cells if cell != self.depot_pos]
+        chosen_indices = self.np_random.choice(len(candidates), size=num_c, replace=False)
+        self.customer_positions = [candidates[int(i)] for i in chosen_indices]
+        self.num_customers = len(self.customer_positions)
+        self.target_mask = (1 << self.num_customers) - 1
+        self.terminal_state = (self.depot_pos[0], self.depot_pos[1], self.target_mask)
+        self.num_states = len(self.valid_cells) * (1 << self.num_customers)
+
     def reset(
         self,
         *,
@@ -155,14 +181,23 @@ class DeliveryGridEnv(gym.Env):
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Khởi tạo lại môi trường về trạng thái ban đầu tại Kho hàng."""
         super().reset(seed=seed)
+
+        use_random = self.random_customers
+        if options and "random_customers" in options:
+            use_random = bool(options["random_customers"])
+
+        if use_random:
+            self._randomize_customers()
+
         self.current_state = (self.depot_pos[0], self.depot_pos[1], 0)
         self.step_count = 0
 
         obs = self._get_obs()
         info = {
             "state_tuple": self.current_state,
-            "state_idx": self.state_to_idx[self.current_state],
-            "remaining_customers": self.num_customers
+            "state_idx": self.state_to_idx.get(self.current_state),
+            "remaining_customers": self.num_customers,
+            "customer_positions": list(self.customer_positions)
         }
         return obs, info
 
@@ -180,10 +215,11 @@ class DeliveryGridEnv(gym.Env):
         delivered_count = bin(self.current_state[2]).count("1")
         info = {
             "state_tuple": self.current_state,
-            "state_idx": self.state_to_idx[self.current_state],
+            "state_idx": self.state_to_idx.get(self.current_state),
             "delivered_count": delivered_count,
             "remaining_customers": self.num_customers - delivered_count,
-            "step_count": self.step_count
+            "step_count": self.step_count,
+            "customer_positions": list(self.customer_positions)
         }
 
         if self.render_mode == "human":
