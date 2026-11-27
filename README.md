@@ -28,3 +28,20 @@ streamlit run app_streamlit.py
 python run_policy_iteration.py
 ```
 * **Chức năng:** Huấn luyện thuật toán Policy Iteration, trích xuất lộ trình 26 bước tối ưu (Reward: +224.0 điểm).
+
+### 4. File chạy thuật toán On-policy First-visit Monte Carlo:
+```bash
+python run_monte_carlo.py
+```
+* **Chức năng:** Huấn luyện chính sách ε-soft bằng On-policy First-visit Monte Carlo; mỗi episode lấy ngẫu nhiên 3–5 điểm giao và đánh giá greedy policy trên bố trí của episode cuối.
+* MC dùng tọa độ khách hàng trong `info` làm thành phần khóa trạng thái, không thay đổi observation của môi trường; episode kết thúc khi hoàn thành nhiệm vụ hoặc chạm giới hạn bước của Gymnasium.
+* Có thể thay đổi số episode, epsilon và seed, ví dụ:
+```bash
+python run_monte_carlo.py --episodes 10000 --epsilon 0.1 --seed 42
+```
+
+### Giao diện Streamlit riêng cho Monte Carlo:
+```bash
+streamlit run demo_monte_carlo.py
+```
+Giao diện này chạy tách biệt, không cần sửa `demo_app.py`.
