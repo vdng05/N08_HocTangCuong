@@ -162,6 +162,37 @@ class DeliveryGridEnv(gym.Env):
 
         return (nr, nc, nmask), reward, False
 
+    def rebuild_mdp_space(self):
+        """Xây dựng lại toàn bộ không gian trạng thái MDP theo customer_positions hiện tại."""
+        self.all_states = [
+            (r, c, mask)
+            for (r, c) in self.valid_cells
+            for mask in range(1 << self.num_customers)
+        ]
+        self.state_to_idx = {s: idx for idx, s in enumerate(self.all_states)}
+        self.idx_to_state = {idx: s for idx, s in enumerate(self.all_states)}
+        self.num_states = len(self.all_states)
+        self.terminal_state = (self.depot_pos[0], self.depot_pos[1], self.target_mask)
+        self.terminal_idx = self.state_to_idx[self.terminal_state]
+
+    def set_customer_positions(self, customer_positions: List[Tuple[int, int]]):
+        """Cập nhật danh sách điểm giao hàng cố định mới và tái xây dựng không gian MDP."""
+        self.customer_positions = [tuple(pt) for pt in customer_positions]
+        self.num_customers = len(self.customer_positions)
+        self.target_mask = (1 << self.num_customers) - 1
+        self.observation_space["visited_mask"] = spaces.Discrete(1 << self.num_customers)
+        self.rebuild_mdp_space()
+        self.current_state = (self.depot_pos[0], self.depot_pos[1], 0)
+        self.step_count = 0
+
+    def generate_random_customers(self, min_customers: int = 3, max_customers: int = 5) -> List[Tuple[int, int]]:
+        """Sinh ngẫu nhiên một bộ tọa độ điểm giao hàng hợp lệ (> 2 điểm)."""
+        rng = np.random.default_rng()
+        num_c = int(rng.integers(max(3, min_customers), max(max(3, min_customers), max_customers) + 1))
+        candidates = [cell for cell in self.valid_cells if cell != self.depot_pos]
+        chosen_indices = rng.choice(len(candidates), size=num_c, replace=False)
+        return [candidates[int(i)] for i in chosen_indices]
+
     def _randomize_customers(self):
         """Sinh ngẫu nhiên số lượng (> 2) và vị trí các điểm giao hàng trên ô hợp lệ."""
         num_c = int(self.np_random.integers(self.min_customers, self.max_customers + 1))

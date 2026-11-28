@@ -388,8 +388,9 @@ class GridVisualizer:
         ax_hud.axhline(9.0, xmin=0.08, xmax=0.92, color="#94a3b8", linestyle="-", linewidth=1.0)
 
         # 1. Trạng thái hoạt động
-        status_color = "#16a34a" if mask == 7 and current_pos == self.depot_pos else "#2563eb"
-        status_text = "HOÀN TẤT NHIỆM VỤ ✓" if mask == 7 and current_pos == self.depot_pos else "ĐANG VẬN HÀNH..."
+        target_mask = (1 << len(self.customer_positions)) - 1
+        status_color = "#16a34a" if mask == target_mask and current_pos == self.depot_pos else "#2563eb"
+        status_text = "HOÀN TẤT NHIỆM VỤ ✓" if mask == target_mask and current_pos == self.depot_pos else "ĐANG VẬN HÀNH..."
         ax_hud.text(0.8, 8.4, "TRẠNG THÁI:", fontsize=10, fontweight="bold", color="#475569")
         ax_hud.text(9.2, 8.4, status_text, fontsize=10, fontweight="bold", color=status_color, ha="right")
 
@@ -413,14 +414,25 @@ class GridVisualizer:
         # 4. Trạng thái từng đơn hàng giao
         ax_hud.text(0.8, 5.4, "DANH SÁCH ĐƠN HÀNG:", fontsize=10, fontweight="bold", color="#0f172a")
 
-        for k, cust in enumerate(self.customer_positions):
-            y_pos = 4.8 - k * 0.65
-            is_done = bool(mask & (1 << k))
-            badge_color = "#16a34a" if is_done else "#ea580c"
-            badge_text = "ĐÃ GIAO ✓" if is_done else "CHỜ GIAO..."
+        num_c = len(self.customer_positions)
+        if num_c <= 3:
+            for k, cust in enumerate(self.customer_positions):
+                y_pos = 4.8 - k * 0.65
+                is_done = bool(mask & (1 << k))
+                badge_color = "#16a34a" if is_done else "#ea580c"
+                badge_text = "ĐÃ GIAO ✓" if is_done else "CHỜ GIAO..."
 
-            ax_hud.text(0.8, y_pos, f"Đơn C{k+1} {cust}:", fontsize=9, color="#334155")
-            ax_hud.text(9.2, y_pos, badge_text, fontsize=9, fontweight="bold", color=badge_color, ha="right")
+                ax_hud.text(0.8, y_pos, f"Đơn C{k+1} {cust}:", fontsize=9, color="#334155")
+                ax_hud.text(9.2, y_pos, badge_text, fontsize=9, fontweight="bold", color=badge_color, ha="right")
+        else:
+            for k, cust in enumerate(self.customer_positions):
+                y_pos = 4.95 - k * 0.40
+                is_done = bool(mask & (1 << k))
+                badge_color = "#16a34a" if is_done else "#ea580c"
+                badge_text = "ĐÃ GIAO ✓" if is_done else "CHỜ..."
+
+                ax_hud.text(0.8, y_pos, f"C{k+1} {cust}:", fontsize=8.5, color="#334155")
+                ax_hud.text(9.2, y_pos, badge_text, fontsize=8.5, fontweight="bold", color=badge_color, ha="right")
 
         ax_hud.axhline(3.0, xmin=0.08, xmax=0.92, color="#cbd5e1", linestyle="--", linewidth=0.8)
 
@@ -590,8 +602,9 @@ class GridVisualizer:
         total_reward = route_result["total_reward"]
 
         # Vẽ nền bản đồ với toàn bộ các ô đã ghé
+        target_mask = (1 << len(self.customer_positions)) - 1
         visited_set = set(route_coords)
-        self.draw_campus_map(ax_map, visited_cells=visited_set, mask=config.TARGET_MASK)
+        self.draw_campus_map(ax_map, visited_cells=visited_set, mask=target_mask)
 
         # Vẽ đường nối lộ trình di chuyển (Màu tím neon nổi bật có viền trắng)
         rows = [p[0] for p in route_coords]
@@ -628,7 +641,7 @@ class GridVisualizer:
         # Vẽ telemetry HUD tổng kết
         self.draw_telemetry_hud(
             ax_hud, total_steps, total_steps, self.depot_pos, "HOÀN TẤT VỀ KHO",
-            config.TARGET_MASK, total_reward, "★ LỘ TRÌNH ĐẠT TỐI ƯU TOÀN CỤC!"
+            target_mask, total_reward, "★ LỘ TRÌNH ĐẠT TỐI ƯU TOÀN CỤC!"
         )
 
         plt.tight_layout()

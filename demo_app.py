@@ -102,6 +102,32 @@ visualizer = GridVisualizer(
     campus_buildings=config.CAMPUS_BUILDINGS
 )
 
+# Bố trí điểm giao dùng chung cho cả 3 thuật toán (có thể Reset & Random 3–5 điểm)
+if "algo_customers" not in st.session_state:
+    st.session_state.algo_customers = list(config.CUSTOMER_POSITIONS)
+
+
+def render_algo_env_controls(key_prefix: str):
+    """Hiển thị bố trí môi trường hiện tại và nút Reset & Random cho các thuật toán."""
+    custs = st.session_state.algo_customers
+    cust_text = ", ".join(f"C{i+1} {pt}" for i, pt in enumerate(custs))
+    st.info(f"📍 **Môi trường huấn luyện hiện tại ({len(custs)} điểm giao):** {cust_text}")
+
+    col_r1, col_r2 = st.columns(2)
+    with col_r1:
+        if st.button("🎲 Reset & Random Vị Trí Mới (3–5 điểm)", use_container_width=True, key=f"{key_prefix}_rand_env"):
+            tmp_env = DeliveryGridEnv()
+            st.session_state.algo_customers = tmp_env.generate_random_customers(3, 5)
+            for res_key in ("pi_results", "mc_results", "ql_results"):
+                st.session_state.pop(res_key, None)
+            st.rerun()
+    with col_r2:
+        if st.button("📌 Reset Về Mặc Định (3 điểm)", use_container_width=True, key=f"{key_prefix}_def_env"):
+            st.session_state.algo_customers = list(config.CUSTOMER_POSITIONS)
+            for res_key in ("pi_results", "mc_results", "ql_results"):
+                st.session_state.pop(res_key, None)
+            st.rerun()
+
 # =============================================================================
 # CHẾ ĐỘ 1: MÔI TRƯỜNG MÔ PHỎNG ĐỘC LẬP (NỘI DUNG CHÍNH ĐỂ TRÌNH BÀY)
 # =============================================================================
@@ -624,27 +650,44 @@ requestAnimationFrame(drawScene);
 # CHẾ ĐỘ 2: KIỂM THỬ THUẬT TOÁN POLICY ITERATION (ĐƯỢC TÁCH RIÊNG)
 # =============================================================================
 elif mode.startswith("2."):
-    st.header("2. KẾT QUẢ THỰC NGHIỆM THUẬT TOÁN POLICY ITERATION")
-    st.info("Phần này được tách độc lập: Chỉ khi nào chủ động gọi chạy thuật toán thì mới tính toán chính sách tối ưu, hiển thị Telemetry và biểu đồ hội tụ.")
-
     from algorithms.policy_iteration import PolicyIteration
 
-    @st.cache_resource
-    def run_pi():
-        env_instance = DeliveryGridEnv()
-        solver_instance = PolicyIteration(env_instance, gamma=config.GAMMA, theta=config.THETA)
-        hist = solver_instance.train(verbose=False)
-        route = solver_instance.extract_optimal_route(max_steps=100)
-        return env_instance, solver_instance, hist, route
+    st.header("2. KẾT QUẢ THỰC NGHIỆM THUẬT TOÁN POLICY ITERATION")
+    render_algo_env_controls("pi")
 
-    env_pi, solver_pi, hist_pi, route_pi = run_pi()
+    with st.sidebar:
+        st.markdown("---")
+        train_pi = st.button("🚀 Huấn luyện Policy Iteration", type="primary", use_container_width=True)
+
+    if train_pi or "pi_results" not in st.session_state:
+        with st.spinner("Đang giải bài toán MDP bằng Policy Iteration..."):
+            env_instance = DeliveryGridEnv(random_customers=False)
+            env_instance.set_customer_positions(st.session_state.algo_customers)
+            solver_instance = PolicyIteration(env_instance, gamma=config.GAMMA, theta=config.THETA)
+            hist = solver_instance.train(verbose=False)
+            route = solver_instance.extract_optimal_route(max_steps=200)
+            st.session_state.pi_results = {
+                "env": env_instance,
+                "solver": solver_instance,
+                "history": hist,
+                "route": route,
+                "customer_positions": list(env_instance.customer_positions),
+            }
+
+    pi_res = st.session_state.pi_results
+    env_pi = pi_res["env"]
+    solver_pi = pi_res["solver"]
+    hist_pi = pi_res["history"]
+    route_pi = pi_res["route"]
+    pi_custs = pi_res["customer_positions"]
+    visualizer.customer_positions = pi_custs
 
     # Metric kết quả
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Tổng Quãng Đường Tối Ưu", f"{route_pi['total_steps']} bước", "Tối ưu tuyệt đối")
     m2.metric("Tổng Phần Thưởng", f"{route_pi['total_reward']:.1f} điểm", "Đúng hàm thưởng mới")
     m3.metric("Số Vòng Lặp Hội Tụ", f"{hist_pi['pi_iterations']} vòng", "Ổn định chính sách")
-    m4.metric("Thời Gian Huấn Luyện", f"{hist_pi['training_time_seconds']:.3f} s", "Tức thì trên CPU")
+    m4.metric("Thời Gian Huấn Luyện", f"{hist_pi['training_time_seconds']:.3f} s", f"{env_pi.num_states} states")
 
     st.markdown("---")
 
@@ -656,14 +699,13 @@ elif mode.startswith("2."):
 
     with tab_pi1:
         st.subheader("Lộ Trình Tối Ưu và Bảng Telemetry Thời Gian Thực")
-        step_val = st.slider("Kéo xem vị trí xe:", 0, route_pi["total_steps"], route_pi["total_steps"], 1)
+        step_val = st.slider("Kéo xem vị trí xe:", 0, route_pi["total_steps"], route_pi["total_steps"], 1, key="pi_step_slider")
 
         fig_pi = plt.figure(figsize=(15, 8.5))
         gs_pi = gridspec.GridSpec(1, 2, width_ratios=[1.7, 1.0], wspace=0.15)
         ax_m = fig_pi.add_subplot(gs_pi[0])
         ax_t = fig_pi.add_subplot(gs_pi[1])
 
-        # Vẽ bản đồ có lộ trình
         coords = route_pi["route_coords"]
         states_s = route_pi["states_sequence"]
         visited = set(coords[:step_val + 1])
@@ -672,7 +714,6 @@ elif mode.startswith("2."):
 
         visualizer.draw_campus_map(ax_m, visited_cells=visited, mask=c_mask)
 
-        # Hướng xe
         if step_val < len(coords) - 1:
             dr = coords[step_val + 1][0] - c_pos[0]
             dc = coords[step_val + 1][1] - c_pos[1]
@@ -687,10 +728,10 @@ elif mode.startswith("2."):
         act_text = route_pi["action_names"][step_val - 1] if step_val > 0 else "XUẤT PHÁT"
         cum_rew = sum(route_pi["rewards"][:step_val])
         evt_txt = "Xe đang di chuyển theo lộ trình tối ưu..."
-        if c_mask == 7 and c_pos == config.DEPOT_POS:
+        if c_mask == env_pi.target_mask and c_pos == config.DEPOT_POS:
             evt_txt = "★ HOÀN TẤT VÀ VỀ KHO THÀNH CÔNG (+100đ)!"
         elif step_val > 0:
-            for k, cp in enumerate(config.CUSTOMER_POSITIONS):
+            for k, cp in enumerate(pi_custs):
                 if c_pos == cp and (c_mask & (1 << k)):
                     evt_txt = f"★ GIAO THÀNH CÔNG C{k+1} (+50đ)!"
 
@@ -702,14 +743,18 @@ elif mode.startswith("2."):
         plt.close(fig_pi)
 
     with tab_pi2:
-        st.subheader("Bản Đồ Nhiệt Hàm Giá Trị Trạng Thái V(s) Qua 4 Giai Đoạn")
+        st.subheader("Bản Đồ Nhiệt Hàm Giá Trị Trạng Thái V(s) Theo Tiến Trình Giao Hàng")
         h1, h2 = st.columns(2)
-        stage_masks = [
-            (0, "Giai Đoạn 1: Chưa giao khách nào -> Hướng tới C2 (7, 4)"),
-            (2, "Giai Đoạn 2: Đã giao C2 -> Hướng tới C3 (7, 9)"),
-            (6, "Giai Đoạn 3: Đã giao C2 & C3 -> Hướng tới C1 (2, 9)"),
-            (7, "Giai Đoạn 4: Đã giao đủ 3 điểm -> Quay về Kho (3, 1)")
-        ]
+        # Lấy tối đa 4 mốc mask tiêu biểu dọc theo lộ trình tối ưu
+        stage_masks = [(0, "Khởi đầu: Chưa giao điểm nào (Mask = 0)")]
+        running_mask = 0
+        for order_item in route_pi["visited_customers_order"]:
+            cid = int(order_item["customer_id"][1:]) - 1
+            running_mask |= (1 << cid)
+            if running_mask != env_pi.target_mask and len(stage_masks) < 3:
+                stage_masks.append((running_mask, f"Sau khi giao {order_item['customer_id']} {order_item['position']}"))
+        stage_masks.append((env_pi.target_mask, f"Đã giao đủ {env_pi.num_customers} điểm -> Quay về Kho {config.DEPOT_POS}"))
+
         for idx, (m, stitle) in enumerate(stage_masks):
             grid_v = np.full((config.GRID_SIZE, config.GRID_SIZE), np.nan)
             for r in range(config.GRID_SIZE):
@@ -719,26 +764,16 @@ elif mode.startswith("2."):
                         grid_v[r, c] = solver_pi.V[env_pi.state_to_idx[s]]
 
             fig_h, ax_h = plt.subplots(figsize=(6, 5))
-            sns.heatmap(grid_v, ax=ax_h, cmap="viridis" if m != 7 else "plasma", cbar=True)
+            sns.heatmap(grid_v, ax=ax_h, cmap="viridis" if m != env_pi.target_mask else "plasma", cbar=True)
             ax_h.set_title(stitle, fontsize=9.5, fontweight="bold")
-            
+
             target_col = h1 if idx % 2 == 0 else h2
             target_col.pyplot(fig_h)
             plt.close(fig_h)
 
     with tab_pi3:
-        st.subheader("Bảng Nhật Ký 26 Bước Di Chuyển")
-        steps_d = []
-        for step_i in range(len(route_pi["actions_taken"])):
-            steps_d.append({
-                "Bước": step_i + 1,
-                "Tọa độ hiện tại": f"({route_pi['route_coords'][step_i][0]}, {route_pi['route_coords'][step_i][1]})",
-                "Hành động": route_pi["action_names"][step_i],
-                "Tọa độ kế tiếp": f"({route_pi['route_coords'][step_i+1][0]}, {route_pi['route_coords'][step_i+1][1]})",
-                "Phần thưởng": route_pi["rewards"][step_i],
-                "Đã giao (Bitmask)": bin(route_pi["states_sequence"][step_i][2])
-            })
-        st.dataframe(pd.DataFrame(steps_d), use_container_width=True)
+        st.subheader(f"Bảng Nhật Ký {route_pi['total_steps']} Bước Di Chuyển")
+        render_route_log_table(route_pi, "pi")
 
 
 # =============================================================================
@@ -861,7 +896,7 @@ if mode.startswith("3."):
     from algorithms.monte_carlo import OnPolicyFirstVisitMC
 
     st.header("3. ON-POLICY FIRST-VISIT MONTE CARLO")
-    st.markdown("Mỗi episode sử dụng bố trí ngẫu nhiên **3–5 điểm giao hàng**.")
+    render_algo_env_controls("mc")
 
     with st.sidebar:
         st.markdown("---")
@@ -875,11 +910,16 @@ if mode.startswith("3."):
         mc_seed = st.number_input(
             "Seed", min_value=0, max_value=2_147_483_647, value=42, step=1, key="mc_seed_input"
         )
+        mc_random_per_ep = st.checkbox("Random lại điểm giao mỗi episode", value=False, key="mc_rand_ep")
         train_mc = st.button("🚀 Huấn luyện Monte Carlo", type="primary", use_container_width=True)
 
     if train_mc:
-        with st.spinner(f"Đang huấn luyện {int(mc_episodes):,} episode với điểm giao ngẫu nhiên..."):
-            env_mc = DeliveryGridEnv(random_customers=True, min_customers=3, max_customers=5)
+        with st.spinner(f"Đang huấn luyện Monte Carlo ({int(mc_episodes):,} episodes)..."):
+            if mc_random_per_ep:
+                env_mc = DeliveryGridEnv(random_customers=True, min_customers=3, max_customers=5)
+            else:
+                env_mc = DeliveryGridEnv(random_customers=False)
+                env_mc.set_customer_positions(st.session_state.algo_customers)
             solver_mc = OnPolicyFirstVisitMC(
                 env=env_mc, gamma=config.GAMMA, epsilon=float(mc_epsilon), seed=int(mc_seed)
             )
@@ -940,13 +980,13 @@ elif mode.startswith("4."):
     from algorithms.q_learning import QLearning
 
     st.header("4. THUẬT TOÁN Q-LEARNING (MODEL-FREE TD CONTROL)")
-    st.markdown("Huấn luyện bảng `Q(s, a)` bằng tương tác thử–sai trên lưới 12x12 với 3 điểm giao cố định `(2, 9), (7, 4), (7, 9)`.")
+    render_algo_env_controls("ql")
 
     with st.sidebar:
         st.markdown("---")
         st.header("⚙️ Tham số Q-Learning")
         ql_episodes = st.number_input(
-            "Số episode", min_value=100, max_value=50_000, value=3_000, step=500, key="ql_episode_input"
+            "Số episode", min_value=100, max_value=50_000, value=5_000, step=500, key="ql_episode_input"
         )
         ql_alpha = st.number_input(
             "Learning rate (alpha)", min_value=0.01, max_value=1.0, value=0.10, step=0.05, format="%.2f", key="ql_alpha_input"
@@ -959,6 +999,7 @@ elif mode.startswith("4."):
     if train_ql:
         with st.spinner(f"Đang huấn luyện Q-Learning trong {int(ql_episodes):,} episodes..."):
             env_ql = DeliveryGridEnv(random_customers=False)
+            env_ql.set_customer_positions(st.session_state.algo_customers)
             agent_ql = QLearning(
                 env=env_ql,
                 alpha=float(ql_alpha),
