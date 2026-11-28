@@ -15,6 +15,7 @@ Nhóm 8 - Khoa CNTT - Trường Đại học Thủy Lợi
 import sys
 import os
 import json
+import time
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -83,7 +84,12 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("🔘 CHẾ ĐỘ HIỂN THỊ")
 mode = st.sidebar.radio(
     "Chọn nội dung hiển thị:",
-    ["1. Môi Trường Mô Phỏng Độc Lập (Báo Cáo Nhóm)", "2. Kiểm Thử Thuật Toán Policy Iteration"],
+    [
+        "1. Môi Trường Mô Phỏng Độc Lập (Báo Cáo Nhóm)",
+        "2. Kiểm Thử Thuật Toán Policy Iteration",
+        "3. Kiểm Thử Thuật Toán Monte Carlo",
+        "4. Kiểm Thử Thuật Toán Q-Learning",
+    ],
     index=0
 )
 
@@ -617,7 +623,7 @@ requestAnimationFrame(drawScene);
 # =============================================================================
 # CHẾ ĐỘ 2: KIỂM THỬ THUẬT TOÁN POLICY ITERATION (ĐƯỢC TÁCH RIÊNG)
 # =============================================================================
-else:
+elif mode.startswith("2."):
     st.header("2. KẾT QUẢ THỰC NGHIỆM THUẬT TOÁN POLICY ITERATION")
     st.info("Phần này được tách độc lập: Chỉ khi nào chủ động gọi chạy thuật toán thì mới tính toán chính sách tối ưu, hiển thị Telemetry và biểu đồ hội tụ.")
 
@@ -733,3 +739,304 @@ else:
                 "Đã giao (Bitmask)": bin(route_pi["states_sequence"][step_i][2])
             })
         st.dataframe(pd.DataFrame(steps_d), use_container_width=True)
+
+
+# =============================================================================
+# HÀM HỖ TRỢ TRỰC QUAN HÓA LỘ TRÌNH CHUNG CHO MONTE CARLO & Q-LEARNING
+# =============================================================================
+def render_algorithm_playback(route_data, customer_positions, algo_title: str, key_prefix: str):
+    """Hiển thị lộ trình từng bước kèm nút chạy tự động và bảng trạng thái."""
+    playback_col, speed_col = st.columns([1, 2])
+    with playback_col:
+        play_route = st.button("▶️ Chạy lộ trình tự động", key=f"{key_prefix}_play")
+    with speed_col:
+        playback_delay = st.slider(
+            "Thời gian giữa các bước (giây)",
+            min_value=0.05, max_value=0.5, value=0.15, step=0.05,
+            key=f"{key_prefix}_delay",
+        )
+
+    total_steps = route_data["total_steps"]
+    step_val = st.slider(
+        "Hoặc kéo để xem từng bước",
+        min_value=0, max_value=total_steps, value=total_steps, step=1,
+        key=f"{key_prefix}_step",
+    )
+
+    coords = route_data["route_coords"]
+    states_seq = route_data["states_sequence"]
+    viz = GridVisualizer(
+        grid_size=config.GRID_SIZE,
+        depot_pos=config.DEPOT_POS,
+        customer_positions=list(customer_positions),
+        obstacles=config.OBSTACLES,
+        campus_buildings=config.CAMPUS_BUILDINGS,
+    )
+
+    map_col, status_col = st.columns([1.7, 1.0])
+    map_ph = map_col.empty()
+    status_ph = status_col.empty()
+
+    def draw_step(step_idx: int):
+        pos = coords[step_idx]
+        mask = states_seq[step_idx][2]
+        fig_s, ax_s = plt.subplots(figsize=(9, 7))
+        viz.draw_campus_map(ax_s, visited_cells=set(coords[:step_idx + 1]), mask=mask)
+
+        if step_idx < len(coords) - 1:
+            dr_s = coords[step_idx + 1][0] - pos[0]
+            dc_s = coords[step_idx + 1][1] - pos[1]
+        elif step_idx > 0:
+            dr_s = pos[0] - coords[step_idx - 1][0]
+            dc_s = pos[1] - coords[step_idx - 1][1]
+        else:
+            dr_s, dc_s = 1, 0
+
+        viz.draw_vehicle(ax_s, float(pos[1]), float(pos[0]), float(dc_s), float(dr_s))
+        ax_s.set_title(
+            f"{algo_title} | Bước {step_idx}/{total_steps} | Xe tại {pos}",
+            fontsize=11, fontweight="bold",
+        )
+        map_ph.pyplot(fig_s, use_container_width=True)
+        plt.close(fig_s)
+
+        delivered = bin(mask).count("1")
+        total_c = len(customer_positions)
+        act_name = route_data["action_names"][step_idx - 1] if step_idx > 0 else "Xuất phát"
+        cum_rew = sum(route_data["rewards"][:step_idx])
+
+        evt = "Xe đang ở kho, sẵn sàng xuất phát."
+        if route_data["is_completed"] and step_idx == total_steps:
+            evt = "🎉 Hoàn thành giao hàng và quay về kho!"
+        elif step_idx > 0:
+            prev_mask = states_seq[step_idx - 1][2]
+            newly = [i + 1 for i in range(total_c) if (mask & (1 << i)) and not (prev_mask & (1 << i))]
+            if newly:
+                evt = "Đã giao thành công: " + ", ".join(f"C{cid}" for cid in newly)
+            elif step_idx == total_steps:
+                evt = "Lộ trình dừng trước khi hoàn thành nhiệm vụ."
+            else:
+                evt = f"Đã thực hiện hành động {act_name}."
+
+        with status_ph.container():
+            st.metric("Vị trí xe", f"({pos[0]}, {pos[1]})", f"Bước {step_idx}")
+            st.metric("Tiến độ giao hàng", f"{delivered}/{total_c}")
+            st.metric("Hành động", act_name)
+            st.metric("Reward tích lũy", f"{cum_rew:+.1f}")
+            st.info(evt)
+
+    if play_route:
+        for s_i in range(total_steps + 1):
+            draw_step(s_i)
+            if s_i < total_steps:
+                time.sleep(playback_delay)
+    else:
+        draw_step(step_val)
+
+
+def render_route_log_table(route_data, key_prefix: str):
+    """Hiển thị bảng nhật ký từng bước của lộ trình."""
+    steps_rows = []
+    cum = 0.0
+    for idx in range(route_data["total_steps"]):
+        rew = route_data["rewards"][idx]
+        cum += rew
+        steps_rows.append({
+            "Bước": idx + 1,
+            "Tọa độ hiện tại": str(route_data["route_coords"][idx]),
+            "Hành động": route_data["action_names"][idx],
+            "Tọa độ kế tiếp": str(route_data["route_coords"][idx + 1]),
+            "Reward": rew,
+            "Reward tích lũy": cum,
+            "Mask": bin(route_data["states_sequence"][idx + 1][2]),
+        })
+    df_log = pd.DataFrame(steps_rows)
+    st.dataframe(df_log, use_container_width=True, key=f"{key_prefix}_df")
+
+
+# =============================================================================
+# CHẾ ĐỘ 3: KIỂM THỬ THUẬT TOÁN MONTE CARLO (TÍCH HỢP TỪ demo_monte_carlo.py)
+# =============================================================================
+if mode.startswith("3."):
+    from algorithms.monte_carlo import OnPolicyFirstVisitMC
+
+    st.header("3. ON-POLICY FIRST-VISIT MONTE CARLO")
+    st.markdown("Mỗi episode sử dụng bố trí ngẫu nhiên **3–5 điểm giao hàng**.")
+
+    with st.sidebar:
+        st.markdown("---")
+        st.header("⚙️ Tham số Monte Carlo")
+        mc_episodes = st.number_input(
+            "Số episode", min_value=1, max_value=100_000, value=10_000, step=1_000, key="mc_episode_input"
+        )
+        mc_epsilon = st.number_input(
+            "Epsilon (xác suất khám phá)", min_value=0.01, max_value=1.0, value=0.1, step=0.05, format="%.2f", key="mc_epsilon_input"
+        )
+        mc_seed = st.number_input(
+            "Seed", min_value=0, max_value=2_147_483_647, value=42, step=1, key="mc_seed_input"
+        )
+        train_mc = st.button("🚀 Huấn luyện Monte Carlo", type="primary", use_container_width=True)
+
+    if train_mc:
+        with st.spinner(f"Đang huấn luyện {int(mc_episodes):,} episode với điểm giao ngẫu nhiên..."):
+            env_mc = DeliveryGridEnv(random_customers=True, min_customers=3, max_customers=5)
+            solver_mc = OnPolicyFirstVisitMC(
+                env=env_mc, gamma=config.GAMMA, epsilon=float(mc_epsilon), seed=int(mc_seed)
+            )
+            history_mc = solver_mc.train(num_episodes=int(mc_episodes), verbose=False)
+            route_mc = solver_mc.extract_greedy_route()
+
+            st.session_state.mc_results = {
+                "history": history_mc,
+                "route": route_mc,
+                "episodes": int(mc_episodes),
+                "epsilon": float(mc_epsilon),
+                "seed": int(mc_seed),
+            }
+
+    if "mc_results" not in st.session_state:
+        st.info("Chọn tham số ở thanh bên rồi bấm **🚀 Huấn luyện Monte Carlo**.")
+    else:
+        mc_res = st.session_state.mc_results
+        history_mc = mc_res["history"]
+        route_mc = mc_res["route"]
+
+        st.caption(f"Kết quả gần nhất: {mc_res['episodes']:,} episode | ε = {mc_res['epsilon']:.2f} | seed = {mc_res['seed']}")
+
+        mc_cols = st.columns(4)
+        mc_cols[0].metric("Tỷ lệ episode hoàn thành", f"{history_mc['completion_rate']:.2%}", f"{history_mc['completed_episodes']} episode")
+        mc_cols[1].metric("Reward TB gần nhất", f"{np.mean(history_mc['episode_rewards'][-1000:]):.1f}", "Tối đa 1000 episode cuối")
+        mc_cols[2].metric("Số bước greedy route", f"{route_mc['total_steps']} bước", "Trên bố trí episode cuối")
+        mc_cols[3].metric("Thời gian huấn luyện", f"{history_mc['training_time_seconds']:.2f} giây", f"{history_mc['truncated_episodes']} chạm giới hạn bước")
+
+        if not route_mc["is_completed"]:
+            st.warning("Greedy route chưa giao đủ khách và quay về kho trong giới hạn bước.")
+
+        tab_mc1, tab_mc2, tab_mc3 = st.tabs(["🗺️ Lộ trình greedy", "📈 Quá trình học", "📋 Nhật ký lộ trình"])
+
+        with tab_mc1:
+            st.subheader("Lộ trình trên bố trí khách hàng của episode cuối")
+            st.write("**Tọa độ khách hàng:** " + ", ".join(f"C{i+1} {p}" for i, p in enumerate(route_mc["customer_positions"])))
+            render_algorithm_playback(route_mc, route_mc["customer_positions"], "Monte Carlo", "mc")
+
+        with tab_mc2:
+            st.subheader("Reward theo episode")
+            df_mc_rew = pd.DataFrame({
+                "Episode": np.arange(1, len(history_mc["episode_rewards"]) + 1),
+                "Reward mỗi episode": history_mc["episode_rewards"],
+            })
+            df_mc_rew["Trung bình trượt 100 episode"] = df_mc_rew["Reward mỗi episode"].rolling(window=100, min_periods=1).mean()
+            st.line_chart(df_mc_rew.set_index("Episode"), use_container_width=True)
+
+        with tab_mc3:
+            st.subheader("Nhật ký từng bước của greedy route")
+            render_route_log_table(route_mc, "mc")
+
+
+# =============================================================================
+# CHẾ ĐỘ 4: KIỂM THỬ THUẬT TOÁN Q-LEARNING (DỰA VÀO run_q_learning.py)
+# =============================================================================
+elif mode.startswith("4."):
+    from algorithms.q_learning import QLearning
+
+    st.header("4. THUẬT TOÁN Q-LEARNING (MODEL-FREE TD CONTROL)")
+    st.markdown("Huấn luyện bảng `Q(s, a)` bằng tương tác thử–sai trên lưới 12x12 với 3 điểm giao cố định `(2, 9), (7, 4), (7, 9)`.")
+
+    with st.sidebar:
+        st.markdown("---")
+        st.header("⚙️ Tham số Q-Learning")
+        ql_episodes = st.number_input(
+            "Số episode", min_value=100, max_value=50_000, value=3_000, step=500, key="ql_episode_input"
+        )
+        ql_alpha = st.number_input(
+            "Learning rate (alpha)", min_value=0.01, max_value=1.0, value=0.10, step=0.05, format="%.2f", key="ql_alpha_input"
+        )
+        ql_eps_decay = st.number_input(
+            "Epsilon decay", min_value=0.900, max_value=0.999, value=0.995, step=0.001, format="%.3f", key="ql_decay_input"
+        )
+        train_ql = st.button("🚀 Huấn luyện Q-Learning", type="primary", use_container_width=True)
+
+    if train_ql:
+        with st.spinner(f"Đang huấn luyện Q-Learning trong {int(ql_episodes):,} episodes..."):
+            env_ql = DeliveryGridEnv(random_customers=False)
+            agent_ql = QLearning(
+                env=env_ql,
+                alpha=float(ql_alpha),
+                gamma=config.GAMMA,
+                epsilon=1.0,
+                epsilon_min=0.01,
+                epsilon_decay=float(ql_eps_decay),
+                num_episodes=int(ql_episodes),
+            )
+            history_ql = agent_ql.train(verbose=False)
+            route_ql = agent_ql.extract_optimal_route(max_steps=200)
+
+            st.session_state.ql_results = {
+                "history": history_ql,
+                "route": route_ql,
+                "customer_positions": list(env_ql.customer_positions),
+                "episodes": int(ql_episodes),
+                "alpha": float(ql_alpha),
+                "epsilon_decay": float(ql_eps_decay),
+            }
+
+    if "ql_results" not in st.session_state:
+        st.info("Chọn tham số ở thanh bên rồi bấm **🚀 Huấn luyện Q-Learning**.")
+    else:
+        ql_res = st.session_state.ql_results
+        history_ql = ql_res["history"]
+        route_ql = ql_res["route"]
+
+        st.caption(
+            f"Kết quả gần nhất: {ql_res['episodes']:,} episodes | α = {ql_res['alpha']:.2f} | "
+            f"ε_decay = {ql_res['epsilon_decay']:.3f}"
+        )
+
+        recent_success_rate = float(np.mean(history_ql["success_per_episode"][-100:]) * 100)
+        ql_cols = st.columns(4)
+        ql_cols[0].metric("Tỷ lệ thành công (100 ep cuối)", f"{recent_success_rate:.1f}%", f"{sum(history_ql['success_per_episode'])} ep thành công")
+        ql_cols[1].metric("Số bước lộ trình", f"{route_ql['total_steps']} bước", "Hoàn thành" if route_ql["is_completed"] else "Chưa hoàn thành")
+        ql_cols[2].metric("Tổng phần thưởng lộ trình", f"{route_ql['total_reward']:+.1f} điểm", "Chính sách Greedy")
+        ql_cols[3].metric("Thời gian huấn luyện", f"{history_ql['training_time_seconds']:.2f} giây", f"Epsilon cuối: {history_ql['epsilon_history'][-1]:.4f}")
+
+        if not route_ql["is_completed"]:
+            st.warning("Chính sách Q-Learning hiện tại chưa hoàn thành nhiệm vụ. Hãy thử tăng số episodes lên (ví dụ 3,000–10,000).")
+
+        tab_ql1, tab_ql2, tab_ql3 = st.tabs(["🗺️ Lộ trình tối ưu", "📈 Quá trình học", "📋 Nhật ký lộ trình"])
+
+        with tab_ql1:
+            st.subheader("Lộ trình trích xuất từ bảng Q(s, a)")
+            if route_ql["visited_customers_order"]:
+                st.write(
+                    "**Thứ tự giao hàng:** "
+                    + " → ".join(f"{c['customer_id']} {c['position']} (Bước {c['step']})" for c in route_ql["visited_customers_order"])
+                )
+            render_algorithm_playback(route_ql, ql_res["customer_positions"], "Q-Learning", "ql")
+
+        with tab_ql2:
+            st.subheader("Biểu đồ hội tụ Q-Learning")
+            ep_idx = np.arange(1, len(history_ql["episode_rewards"]) + 1)
+            df_ql_rew = pd.DataFrame({
+                "Episode": ep_idx,
+                "Reward mỗi episode": history_ql["episode_rewards"],
+            })
+            df_ql_rew["Trung bình trượt 100 episode"] = df_ql_rew["Reward mỗi episode"].rolling(window=100, min_periods=1).mean()
+            st.line_chart(df_ql_rew.set_index("Episode"), use_container_width=True)
+
+            col_q1, col_q2 = st.columns(2)
+            with col_q1:
+                df_ql_succ = pd.DataFrame({
+                    "Episode": ep_idx,
+                    "Tỷ lệ thành công (%)": pd.Series(history_ql["success_per_episode"], dtype=float).rolling(window=100, min_periods=1).mean() * 100,
+                })
+                st.line_chart(df_ql_succ.set_index("Episode"), use_container_width=True)
+            with col_q2:
+                df_ql_eps = pd.DataFrame({
+                    "Episode": ep_idx,
+                    "Epsilon": history_ql["epsilon_history"],
+                })
+                st.line_chart(df_ql_eps.set_index("Episode"), use_container_width=True)
+
+        with tab_ql3:
+            st.subheader("Nhật ký từng bước của lộ trình Q-Learning")
+            render_route_log_table(route_ql, "ql")

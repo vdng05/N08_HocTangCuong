@@ -246,7 +246,8 @@ def main():
         visualizer.plot_optimal_route(
             route_result,
             save_path=route_plot_path,
-            show=False
+            show=False,
+            algorithm_name="Q-LEARNING"
         )
 
         print(f"[KẾT QUẢ] Đã lưu bản đồ lộ trình: {route_plot_path}")

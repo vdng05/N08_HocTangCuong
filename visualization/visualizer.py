@@ -440,7 +440,8 @@ class GridVisualizer:
         substeps: int = 8,
         interval_ms: int = 40,
         save_gif_path: Optional[str] = None,
-        show: bool = True
+        show: bool = True,
+        algorithm_name: str = "POLICY ITERATION"
     ):
         """
         Mô phỏng xe di chuyển mượt mà (Smooth Motion Animation) qua từng ô lưới
@@ -540,7 +541,7 @@ class GridVisualizer:
             self.draw_vehicle(ax_map, c, r, dc, dr)
 
             ax_map.set_title(
-                f"MÔ PHỎNG LỘ TRÌNH GIAO HÀNG TỰ HÀNH (POLICY ITERATION)\n"
+                f"MÔ PHỎNG LỘ TRÌNH GIAO HÀNG TỰ HÀNH ({algorithm_name})\n"
                 f"Khuôn viên Đại học Thủy Lợi | Lưới 12x12 | Bước: {step_i}/{total_steps}",
                 fontsize=11.5, fontweight="bold", pad=10, color="#0f172a"
             )
@@ -573,7 +574,8 @@ class GridVisualizer:
         self,
         route_result: Dict[str, Any],
         save_path: Optional[str] = None,
-        show: bool = False
+        show: bool = False,
+        algorithm_name: str = "POLICY ITERATION"
     ):
         """Vẽ lộ trình tĩnh độ nét cao kèm số thứ tự từng bước đi."""
         if save_path is None:
@@ -618,7 +620,7 @@ class GridVisualizer:
             )
 
         ax_map.set_title(
-            f"BẢN ĐỒ LỘ TRÌNH GIAO HÀNG TỐI ƯU (POLICY ITERATION)\n"
+            f"BẢN ĐỒ LỘ TRÌNH GIAO HÀNG TỐI ƯU ({algorithm_name})\n"
             f"Tổng quãng đường: {total_steps} bước | Tổng phần thưởng: {total_reward:+.1f} điểm",
             fontsize=12, fontweight="bold", pad=12, color="#0f172a"
         )
